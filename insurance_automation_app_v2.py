@@ -21,8 +21,8 @@ else:
 # poppler の確認
 POPPLER_AVAILABLE = shutil.which("pdftoppm") is not None
 
-# モデル初期化を修正（gemini-pro → gemini-pro-vision）
-model = genai.GenerativeModel("gemini-pro-vision")
+# モデル初期化を修正
+model = genai.GenerativeModel("gemini-1.0-pro-vision")  # gemini-pro-vision から変更
 
 def extract_insurance_info_with_gemini_vision(pdf_bytes):
     """PDFバイト列から保険情報を抽出"""
@@ -108,7 +108,7 @@ st.sidebar.write("st.secrets に GEMINI_API_KEY が存在するか:", secrets_ha
 st.sidebar.write("poppler (pdftoppm) available:", POPPLER_AVAILABLE)
 
 # モデル初期化（参考用）
-model = genai.GenerativeModel("gemini-pro-vision")
+model = genai.GenerativeModel("gemini-1.0-pro-vision")
 
 st.set_page_config(page_title="保険業務自動化アシスタント", layout="wide")
 # ---- セッション状態の初期化（必須）----
