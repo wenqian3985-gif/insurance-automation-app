@@ -21,8 +21,19 @@ else:
 # poppler の確認
 POPPLER_AVAILABLE = shutil.which("pdftoppm") is not None
 
-# モデル初期化を修正
-model = genai.GenerativeModel("gemini-1.0-pro-vision")  # gemini-pro-vision から変更
+# モデル初期化を修正（利用可能なモデルを使用）
+model = genai.GenerativeModel("gemini-pro-vision")  # gemini-1.0-pro-vision から変更
+
+# デバッグ情報を追加（使用可能なモデル一覧を表示）
+st.sidebar.markdown("**使用可能なモデル一覧**")
+try:
+    available_models = genai.list_models()
+    st.sidebar.write("利用可能なモデル:")
+    for m in available_models:
+        st.sidebar.write(f"- {m.name}")
+        st.sidebar.write(f"  サポートされているメソッド: {m.supported_generation_methods}")
+except Exception as e:
+    st.sidebar.write(f"モデル一覧取得エラー: {e}")
 
 def extract_insurance_info_with_gemini_vision(pdf_bytes):
     """PDFバイト列から保険情報を抽出"""
@@ -107,8 +118,19 @@ st.sidebar.write("GEMINI_ENABLED:", GEMINI_ENABLED if 'GEMINI_ENABLED' in global
 st.sidebar.write("st.secrets に GEMINI_API_KEY が存在するか:", secrets_has_key)
 st.sidebar.write("poppler (pdftoppm) available:", POPPLER_AVAILABLE)
 
+# デバッグ情報を追加（使用可能なモデル一覧を表示）
+st.sidebar.markdown("**使用可能なモデル一覧**")
+try:
+    available_models = genai.list_models()
+    st.sidebar.write("利用可能なモデル:")
+    for m in available_models:
+        st.sidebar.write(f"- {m.name}")
+        st.sidebar.write(f"  サポートされているメソッド: {m.supported_generation_methods}")
+except Exception as e:
+    st.sidebar.write(f"モデル一覧取得エラー: {e}")
+
 # モデル初期化（参考用）
-model = genai.GenerativeModel("gemini-1.0-pro-vision")
+model = genai.GenerativeModel("gemini-pro-vision")
 
 st.set_page_config(page_title="保険業務自動化アシスタント", layout="wide")
 # ---- セッション状態の初期化（必須）----
