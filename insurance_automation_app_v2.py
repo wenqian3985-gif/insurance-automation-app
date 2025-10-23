@@ -147,7 +147,7 @@ if "site_df" not in st.session_state:
 
 if "comparison_df" not in st.session_state:
     st.session_state["comparison_df"] = pd.DataFrame(
-        columns=["保険会社名", "保険期間", "保険金額", "補償内容"]
+        columns=["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
     )
 
 if "auto_process_done" not in st.session_state:
@@ -194,7 +194,7 @@ if "customer_df" not in st.session_state:
 if "site_df" not in st.session_state:
     st.session_state["site_df"] = None
 if "comparison_df" not in st.session_state:
-    st.session_state["comparison_df"] = pd.DataFrame(columns=["保険会社名", "保険期間", "保険金額", "補償内容"])
+    st.session_state["comparison_df"] = pd.DataFrame(columns=["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"])
 if "auto_process_done" not in st.session_state:
     st.session_state["auto_process_done"] = False
 
@@ -244,9 +244,16 @@ def extract_insurance_info_with_gemini_vision(pdf_bytes_or_images):
 
     # プロンプト作成
     base_prompt = (
-        "以下の保険見積書の内容から、保険会社名、保険期間、保険金額、補償内容を抽出してください。"
+        "以下の保険見積書の内容から、氏名、生年月日、保険会社名、保険期間、保険金額、補償内容を抽出してください。"
         "抽出した情報はJSON形式で出力してください。"
-        '例: {"保険会社名": "架空保険株式会社", "保険期間": "2025年10月1日～2026年9月30日", "保険金額": "10,000,000円", "補償内容": "入院日額5,000円"}'
+        '例: {'
+        '"氏名": "山田太郎", '
+        '"生年月日": "1980年1月1日", '
+        '"保険会社名": "架空保険株式会社", '
+        '"保険期間": "2025年10月1日～2026年9月30日", '
+        '"保険金額": "10,000,000円", '
+        '"補償内容": "入院日額5,000円"'
+        '}'
     )
 
     if extracted_text:
@@ -317,6 +324,8 @@ if len(sys.argv) > 1:
             # 比較表に追加
             for result in results:
                 new_quote_data = {
+                    "氏名": result.get("氏名", ""),
+                    "生年月日": result.get("生年月日", ""),
                     "保険会社名": result.get("保険会社名", ""),
                     "保険期間": result.get("保険期間", ""),
                     "保険金額": result.get("保険金額", ""),
@@ -435,6 +444,8 @@ if folder_path_input and st.button("フォルダ内のすべてのPDFを処理",
             # 比較表に追加
             for result in results:
                 new_quote_data = {
+                    "氏名": result.get("氏名", ""),
+                    "生年月日": result.get("生年月日", ""),
                     "保険会社名": result.get("保険会社名", ""),
                     "保険期間": result.get("保険期間", ""),
                     "保険金額": result.get("保険金額", ""),
@@ -468,6 +479,8 @@ if quote_pdf:
                 
                 # 比較表に追加
                 new_quote_data = {
+                    "氏名": extracted_info.get("氏名", ""),
+                    "生年月日": extracted_info.get("生年月日", ""),
                     "保険会社名": extracted_info.get("保険会社名", ""),
                     "保険期間": extracted_info.get("保険期間", ""),
                     "保険金額": extracted_info.get("保険金額", ""),
