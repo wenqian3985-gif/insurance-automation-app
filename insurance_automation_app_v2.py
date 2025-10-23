@@ -21,8 +21,8 @@ else:
 # poppler の確認
 POPPLER_AVAILABLE = shutil.which("pdftoppm") is not None
 
-# モデル初期化を修正（利用可能なモデルを使用）
-model = genai.GenerativeModel("gemini-pro-vision")  # gemini-1.0-pro-vision から変更
+# モデル初期化の箇所を修正
+model = genai.GenerativeModel("gemini-2.5-flash")  # gemini-pro や gemini-pro-vision から変更
 
 # デバッグ情報を追加（使用可能なモデル一覧を表示）
 st.sidebar.markdown("**使用可能なモデル一覧**")
@@ -129,8 +129,8 @@ try:
 except Exception as e:
     st.sidebar.write(f"モデル一覧取得エラー: {e}")
 
-# モデル初期化（参考用）
-model = genai.GenerativeModel("gemini-pro-vision")
+# モデル初期化の箇所を修正
+model = genai.GenerativeModel("gemini-2.5-flash")  # gemini-pro や gemini-pro-vision から変更
 
 st.set_page_config(page_title="保険業務自動化アシスタント", layout="wide")
 # ---- セッション状態の初期化（必須）----
