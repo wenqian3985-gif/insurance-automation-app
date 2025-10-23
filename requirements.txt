@@ -1,22 +1,18 @@
 streamlit==1.50.0
-numpy==1.26.450.0
+numpy==1.26.4
 pandas==2.2.2
 pillow==11.0.0
 pdf2image==1.17.0
-PyPDF2==3.0.117.0
+PyPDF2==3.0.1
 openpyxl==3.1.5
-openpyxl==3.1.5
-# Gemini SDK と周辺（gRPC の安定組み合わせ）
-google-generativeai==0.8.3み合わせ）
-grpcio==1.62.2iveai==0.8.3
+
+# Gemini SDK
+google-generativeai==0.8.3
+
+# gRPC / protobuf 安定組み合わせ
+grpcio==1.62.2
 grpcio-status==1.62.2
-protobuf>=4.25,<662.2
+protobuf>=4.25,<4.28
+
+# その他（任意）
 google-api-core==2.19.1
-googleapis-common-protos
-googleapis-common-protos
-streamlit
-pandas
-pillow
-pdf2image
-openpyxl
-google-generative-ai
