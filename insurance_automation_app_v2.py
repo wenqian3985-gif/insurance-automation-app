@@ -1,23 +1,34 @@
-
 import streamlit as st
 import pandas as pd
 import os
 import json
 import io
 from PIL import Image
-from pdf2image import convert_from_path
+from pdf2image import convert_from_path, convert_from_bytes
 import base64
 import glob
 import sys
 import google.generativeai as genai
-import os
+import shutil
 
-# 環境変数からAPIキーを取得
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# GEMINI_API_KEY を取得 (Streamlit の st.secrets を優先し、環境変数をフォールバック)
+GEMINI_API_KEY = None
+try:
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")  # Streamlit Cloud の Secrets から取得
+except Exception:
+    GEMINI_API_KEY = None
 
-# モデル初期化
-model = genai.GenerativeModel("gemini-1.5-flash")
+if not GEMINI_API_KEY:
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    GEMINI_ENABLED = True
+else:
+    GEMINI_ENABLED = False
+
+# モデル初期化（参考用）
+model = "gemini-2.5-flash"
 
 st.set_page_config(page_title="保険業務自動化アシスタント", layout="wide")
 # ---- セッション状態の初期化（必須）----
@@ -71,7 +82,7 @@ st.markdown("""
 
 st.markdown('<div class="main-header">🏥 保険業務自動化アシスタント</div>', unsafe_allow_html=True)
 
-# セッション状態の初期化
+# セッション状態の初期化（重複防止のため再チェック）
 if "customer_df" not in st.session_state:
     st.session_state["customer_df"] = None
 if "site_df" not in st.session_state:
@@ -81,14 +92,36 @@ if "comparison_df" not in st.session_state:
 if "auto_process_done" not in st.session_state:
     st.session_state["auto_process_done"] = False
 
+if not GEMINI_ENABLED:
+    st.warning("環境変数 GEMINI_API_KEY が設定されていません。Gemini API 呼び出しは無効になっています。")
+
 # PDF情報抽出関数
-def convert_pdf_to_images(pdf_path):
-    """PDFファイルパスから画像に変換"""
-    images = convert_from_path(pdf_path)
-    return images
+def convert_pdf_to_images(pdf_path_or_bytes):
+    """PDFファイル（パスまたはbytes）から画像に変換"""
+    try:
+        # 引数が bytes なら convert_from_bytes を使う
+        if isinstance(pdf_path_or_bytes, (bytes, bytearray)):
+            images = convert_from_bytes(pdf_path_or_bytes)
+        else:
+            # パスを与えられた場合はまず convert_from_path を試す
+            images = convert_from_path(pdf_path_or_bytes)
+        return images
+    except Exception as e:
+        # よくある原因は poppler が未インストールであること
+        hint = (
+            "PDF の変換中にエラーが発生しました。"
+            " poppler がインストールされていない可能性があります。"
+            " Linux (Debian) では次のコマンドでインストールしてください:\n"
+            "  sudo apt-get update && sudo apt-get install -y poppler-utils\n"
+            " または devcontainer に poppler が含まれているか確認してください。"
+        )
+        raise RuntimeError(f"{e}\n\n{hint}")
 
 def extract_insurance_info_with_gemini_vision(images):
     """Gemini Vision APIを使用してPDFから保険情報を抽出"""
+    if not GEMINI_ENABLED:
+        raise RuntimeError("GEMINI_API_KEY が設定されていないため、Gemini API 呼び出しはできません。")
+
     messages = [
         {"role": "system", "content": "あなたは保険見積書から情報を抽出するアシスタントです。"}
     ]
@@ -118,12 +151,42 @@ def extract_insurance_info_with_gemini_vision(images):
 
     messages.append({"role": "user", "content": user_content})
 
-    response = client.chat.completions.create(
-        model="gemini-2.5-flash",
-        messages=messages,
-        response_format={"type": "json_object"}
-    )
-    return response.choices[0].message.content
+    # Google Generative AI Python SDK 呼び出し（genai オブジェクトを使用）
+    try:
+        response = genai.chat.completions.create(
+            model=model,
+            messages=messages,
+            response_format={"type": "json_object"}
+        )
+    except Exception as e:
+        raise RuntimeError(f"Gemini API 呼び出し中にエラーが発生しました: {e}")
+
+    # 応答の取り出し
+    try:
+        # 応答の形式により取り出し方が変わる可能性があるため安全に抽出
+        content = None
+        # response がオブジェクトの場合
+        if hasattr(response, "choices") and len(response.choices) > 0:
+            # choice が message を持つ場合
+            choice = response.choices[0]
+            if hasattr(choice, "message") and hasattr(choice.message, "content"):
+                content = choice.message.content
+            else:
+                # 辞書形式のとき
+                content = getattr(choice, "content", None) or choice.get("content") if isinstance(choice, dict) else None
+        elif isinstance(response, dict):
+            # dict 形式の場合をカバー
+            choices = response.get("choices", [])
+            if choices:
+                msg = choices[0].get("message") or choices[0]
+                content = msg.get("content") if isinstance(msg, dict) else None
+
+        if content is None:
+            raise RuntimeError("Gemini API の応答からコンテンツを取得できませんでした。")
+
+        return content
+    except Exception as e:
+        raise RuntimeError(f"Gemini 応答の解析中にエラーが発生しました: {e}")
 
 def process_pdf_folder(folder_path):
     """指定フォルダ内のすべてのPDFファイルを処理"""
@@ -141,13 +204,16 @@ def process_pdf_folder(folder_path):
         status_text.text(f"処理中: {os.path.basename(pdf_file)} ({idx + 1}/{len(pdf_files)})")
         
         try:
-            images = convert_pdf_to_images(pdf_file)
+            # PDFをバイトで読み込み、convert_from_bytes を使って変換（ファイルパス依存問題を回避）
+            with open(pdf_file, "rb") as f:
+                pdf_bytes = f.read()
+            images = convert_pdf_to_images(pdf_bytes)
             extracted_info_str = extract_insurance_info_with_gemini_vision(images)
             
-            if extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
+            if isinstance(extracted_info_str, str) and extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
                 extracted_info_str = extracted_info_str[len("```json\n"):-len("\n```")]
 
-            extracted_info = json.loads(extracted_info_str)
+            extracted_info = json.loads(extracted_info_str) if isinstance(extracted_info_str, str) else extracted_info_str
             extracted_info["ファイル名"] = os.path.basename(pdf_file)
             results.append(extracted_info)
             
@@ -220,20 +286,16 @@ with tab1:
         if st.button("PDFから情報を抽出", key="extract_btn"):
             with st.spinner("PDFから情報を抽出しています...しばらくお待ちください。"):
                 try:
-                    # 一時ファイルとして保存
-                    with open("temp_existing.pdf", "wb") as f:
-                        f.write(existing_insurance_pdf.getbuffer())
-                    
-                    images = convert_pdf_to_images("temp_existing.pdf")
+                    # 一時ファイルとして保存せずに bytes を直接処理
+                    pdf_bytes = existing_insurance_pdf.getvalue()
+                    images = convert_pdf_to_images(pdf_bytes)
                     extracted_info_str = extract_insurance_info_with_gemini_vision(images)
                     
-                    os.remove("temp_existing.pdf")
-                    
                     # JSON文字列をパース
-                    if extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
+                    if isinstance(extracted_info_str, str) and extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
                         extracted_info_str = extracted_info_str[len("```json\n"):-len("\n```")]
 
-                    extracted_info = json.loads(extracted_info_str)
+                    extracted_info = json.loads(extracted_info_str) if isinstance(extracted_info_str, str) else extracted_info_str
                     st.markdown('<div class="success-box">✅ PDFから情報が正常に抽出されました。</div>', unsafe_allow_html=True)
                     st.json(extracted_info)
                     
@@ -282,7 +344,7 @@ st.markdown('<div class="info-box">💡 保険会社からダウンロードし�
 
 # フォルダ指定による一括処理
 st.subheader("フォルダ内のPDFファイルを一括処理")
-folder_path_input = st.text_input("PDFファイルが保存されているフォルダパスを入力", placeholder="例: C:\\Users\\YourName\\Downloads\\見積書")
+folder_path_input = st.text_input("PDFファイルが保存されているフォルダパスを入力", placeholder="例: /home/yourname/Downloads/見積書")
 
 if folder_path_input and st.button("フォルダ内のすべてのPDFを処理", key="process_folder_btn"):
     if os.path.isdir(folder_path_input):
@@ -315,19 +377,14 @@ if quote_pdf:
     if st.button("見積書から情報を抽出して比較表に追加", key="extract_quote_btn"):
         with st.spinner("見積書から情報を抽出しています..."):
             try:
-                # 一時ファイルとして保存
-                with open("temp_quote.pdf", "wb") as f:
-                    f.write(quote_pdf.getbuffer())
-                
-                images = convert_pdf_to_images("temp_quote.pdf")
+                pdf_bytes = quote_pdf.getvalue()
+                images = convert_pdf_to_images(pdf_bytes)
                 extracted_info_str = extract_insurance_info_with_gemini_vision(images)
                 
-                os.remove("temp_quote.pdf")
-                
-                if extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
+                if isinstance(extracted_info_str, str) and extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
                     extracted_info_str = extracted_info_str[len("```json\n"):-len("\n```")]
 
-                extracted_info = json.loads(extracted_info_str)
+                extracted_info = json.loads(extracted_info_str) if isinstance(extracted_info_str, str) else extracted_info_str
                 st.markdown('<div class="success-box">✅ 見積書から情報が正常に抽出されました。</div>', unsafe_allow_html=True)
                 st.json(extracted_info)
                 
@@ -368,5 +425,5 @@ else:
 
 # --- フッター ---
 st.markdown("---")
-st.markdown("**保険業務自動化アシスタント** | Powered by Gemini 2.5 Flash & Streamlit")
+st.markdown("**保険業務自動化アシスタント** | Powered by Gemini & Streamlit")
 
