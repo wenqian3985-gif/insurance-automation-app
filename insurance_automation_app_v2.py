@@ -273,7 +273,22 @@ def extract_insurance_info_with_gemini_vision(pdf_bytes_or_images):
 
 def process_pdf_folder(folder_path):
     """指定フォルダ内のすべてのPDFファイルを処理"""
-    pdf_files = glob.glob(os.path.join(folder_path, "*.pdf"))
+    # パスの正規化（Windows形式 → POSIX形式）
+    folder_path = os.path.normpath(folder_path).replace("\\", "/")
+    
+    # フォルダ存在チェックを改善
+    if not os.path.exists(folder_path):
+        st.error(f"フォルダが見つかりません: {folder_path}")
+        return []
+    
+    if not os.path.isdir(folder_path):
+        st.error(f"指定されたパスはフォルダではありません: {folder_path}")
+        return []
+    
+    # PDFファイル一覧を取得（複数パターンに対応）
+    pdf_files = []
+    for pattern in ["*.pdf", "*.PDF"]:
+        pdf_files.extend(glob.glob(os.path.join(folder_path, pattern)))
     
     if not pdf_files:
         st.warning(f"フォルダ {folder_path} にPDFファイルが見つかりませんでした。")
@@ -287,24 +302,34 @@ def process_pdf_folder(folder_path):
         status_text.text(f"処理中: {os.path.basename(pdf_file)} ({idx + 1}/{len(pdf_files)})")
         
         try:
-            # PDFをバイトで読み込み、convert_from_bytes を使って変換（ファイルパス依存問題を回避）
+            # PDFをバイトで読み込み
             with open(pdf_file, "rb") as f:
                 pdf_bytes = f.read()
+            
+            # Gemini で情報抽出
             extracted_info_str = extract_insurance_info_with_gemini_vision(pdf_bytes)
             
-            if isinstance(extracted_info_str, str) and extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
-                extracted_info_str = extracted_info_str[len("```json\n"):-len("\n```")]
-
-            extracted_info = json.loads(extracted_info_str) if isinstance(extracted_info_str, str) else extracted_info_str
-            extracted_info["ファイル名"] = os.path.basename(pdf_file)
-            results.append(extracted_info)
+            # JSON形式の処理
+            if isinstance(extracted_info_str, str):
+                if extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
+                    extracted_info_str = extracted_info_str[len("```json\n"):-len("\n```")]
+                try:
+                    extracted_info = json.loads(extracted_info_str)
+                except json.JSONDecodeError:
+                    st.error(f"JSONパースエラー: {pdf_file}")
+                    continue
+            
+            # 情報を results に追加
+            if isinstance(extracted_info, dict):
+                extracted_info["ファイル名"] = os.path.basename(pdf_file)
+                results.append(extracted_info)
             
         except Exception as e:
-            st.error(f"{os.path.basename(pdf_file)} の処理中にエラーが発生しました: {e}")
+            st.error(f"{os.path.basename(pdf_file)} の処理中にエラー: {str(e)}")
         
         progress_bar.progress((idx + 1) / len(pdf_files))
     
-    status_text.text("すべてのPDFファイルの処理が完了しました！")
+    status_text.text("処理完了")
     return results
 
 # コマンドライン引数からPDFフォルダパスを取得（PADから起動された場合）
@@ -439,30 +464,38 @@ st.markdown('<div class="info-box">💡 保険会社からダウンロードし�
 
 # フォルダ指定による一括処理
 st.subheader("フォルダ内のPDFファイルを一括処理")
-folder_path_input = st.text_input("PDFファイルが保存されているフォルダパスを入力", placeholder="例: /home/yourname/Downloads/見積書")
+folder_path_input = st.text_input(
+    "PDFファイルが保存されているフォルダパスを入力",
+    placeholder="/path/to/pdfs または C:/Users/YourName/Documents/PDFs",
+    help="Windows形式のパス (C:\\Users\\...) も使用可能です"
+)
 
-if folder_path_input and st.button("フォルダ内のすべてのPDFを処理", key="process_folder_btn"):
-    if os.path.isdir(folder_path_input):
-        with st.spinner("フォルダ内のPDFファイルを処理しています..."):
-            results = process_pdf_folder(folder_path_input)
+if folder_path_input:
+    if st.button("フォルダ内のPDFを処理", key="process_folder"):
+        normalized_path = os.path.normpath(folder_path_input).replace("\\", "/")
+        st.info(f"処理フォルダ: {normalized_path}")
         
-        if results:
-            st.markdown('<div class="success-box">✅ すべてのPDFファイルから情報が抽出されました。</div>', unsafe_allow_html=True)
+        with st.spinner("PDFファイルを処理中..."):
+            results = process_pdf_folder(normalized_path)
             
-            # 比較表に追加
-            for result in results:
-                new_quote_data = {
-                    "氏名": result.get("氏名", ""),
-                    "生年月日": result.get("生年月日", ""),
-                    "保険会社名": result.get("保険会社名", ""),
-                    "保険期間": result.get("保険期間", ""),
-                    "保険金額": result.get("保険金額", ""),
-                    "補償内容": result.get("補償内容", ""),
-                }
-                new_quote_row = pd.DataFrame([new_quote_data])
-                st.session_state["comparison_df"] = pd.concat([st.session_state["comparison_df"], new_quote_row], ignore_index=True)
-    else:
-        st.error("指定されたフォルダが存在しません。正しいパスを入力してください。")
+            if results:
+                st.success(f"{len(results)}件のPDFから情報を抽出しました")
+                
+                # 比較表に追加
+                for result in results:
+                    new_quote_data = {
+                        "氏名": result.get("氏名", ""),
+                        "生年月日": result.get("生年月日", ""),
+                        "保険会社名": result.get("保険会社名", ""),
+                        "保険期間": result.get("保険期間", ""),
+                        "保険金額": result.get("保険金額", ""),
+                        "補償内容": result.get("補償内容", "")
+                    }
+                    st.session_state["comparison_df"] = pd.concat(
+                        [st.session_state["comparison_df"], 
+                         pd.DataFrame([new_quote_data])], 
+                        ignore_index=True
+                    )
 
 st.markdown("---")
 
