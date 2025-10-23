@@ -27,6 +27,21 @@ if GEMINI_API_KEY:
 else:
     GEMINI_ENABLED = False
 
+# poppler (pdftoppm) が PATH にあるか確認（Streamlit Cloud では packages.txt に poppler-utils を追加すること）
+POPPLER_AVAILABLE = shutil.which("pdftoppm") is not None
+
+# ここからデバッグ表示（値そのものは表示しない）
+try:
+    secrets_has_key = "GEMINI_API_KEY" in st.secrets
+except Exception:
+    secrets_has_key = False
+
+# サイドバーに簡易状態表示（機密は表示しない）
+st.sidebar.markdown("**Debug**")
+st.sidebar.write("GEMINI_ENABLED:", GEMINI_ENABLED if 'GEMINI_ENABLED' in globals() else False)
+st.sidebar.write("st.secrets に GEMINI_API_KEY が存在するか:", secrets_has_key)
+st.sidebar.write("poppler (pdftoppm) available:", POPPLER_AVAILABLE)
+
 # モデル初期化（参考用）
 model = "gemini-2.5-flash"
 
