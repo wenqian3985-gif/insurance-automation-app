@@ -381,40 +381,47 @@ st.markdown('<div class="section-header">📁 1. 事前ファイル準備</div>'
 col1, col2 = st.columns(2)
 
 # 抽出項目を取得する関数
-def get_extraction_fields_from_excel(df):
-    """顧客情報.xlsxから抽出項目を取得"""
-    if df is None:
-        return ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]  # デフォルト値
-    
+def get_extraction_fields_from_excel(excel_data):
+    """顧客情報.xlsxから動的に抽出項目を取得"""
     try:
-        # 「抽出項目」シートがあれば、その列名を使用
-        if "抽出項目" in df.keys():
-            fields = df["抽出項目"].columns.tolist()
-            if fields:
+        # 「顧客情報」シートから列名を取得
+        if isinstance(excel_data, dict) and "顧客情報" in excel_data:
+            customer_df = excel_data["顧客情報"]
+            if not customer_df.empty:
+                # 列名のリストを取得
+                fields = customer_df.columns.tolist()
                 return fields
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"抽出項目の取得中にエラー: {e}")
     
-    # シートが見つからない場合はデフォルト値を返す
-    return ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
+    # エラー時やデータが取得できない場合は空のリストを返す
+    return []
 
 with col1:
     st.subheader("顧客情報.xlsx")
     customer_info_file = st.file_uploader("顧客情報.xlsx をアップロード", type=["xlsx"], key="customer_file")
     if customer_info_file:
-        # 全シートを読み込む
-        excel_data = pd.read_excel(customer_info_file, sheet_name=None)
-        st.session_state["customer_df"] = excel_data.get("顧客情報", pd.DataFrame())  # メインの顧客情報
-        
-        # 抽出項目を更新
-        st.session_state["extraction_fields"] = get_extraction_fields_from_excel(excel_data)
-        
-        st.markdown('<div class="success-box">✅ 顧客情報.xlsx が正常に読み込まれました。</div>', unsafe_allow_html=True)
-        st.dataframe(st.session_state["customer_df"], width='stretch')
-        
-        # 抽出項目の確認表示
-        st.markdown("**設定された抽出項目:**")
-        st.write(", ".join(st.session_state["extraction_fields"]))
+        try:
+            # 全シートを読み込む
+            excel_data = pd.read_excel(customer_info_file, sheet_name=None)
+            st.session_state["customer_df"] = excel_data.get("顧客情報", pd.DataFrame())
+            
+            # 抽出項目を動的に更新
+            extraction_fields = get_extraction_fields_from_excel(excel_data)
+            if extraction_fields:
+                st.session_state["extraction_fields"] = extraction_fields
+                st.session_state["comparison_df"] = pd.DataFrame(columns=extraction_fields)
+                
+                st.markdown('<div class="success-box">✅ 顧客情報.xlsx が正常に読み込まれました。</div>', unsafe_allow_html=True)
+                st.dataframe(st.session_state["customer_df"], width='stretch')
+                
+                # 抽出項目の確認表示
+                st.markdown("**設定された抽出項目:**")
+                st.write(", ".join(extraction_fields))
+            else:
+                st.error("顧客情報.xlsx から列名を取得できませんでした。")
+        except Exception as e:
+            st.error(f"ファイルの読み込み中にエラー: {e}")
 
 with col2:
     st.subheader("見積サイト情報.xlsx")
@@ -548,15 +555,10 @@ if uploaded_files:
         
         if results:
             st.success(f"{len(results)}件のPDFから情報を抽出しました")
-            # 比較表に追加
+            # 比較表に追加（動的な列名に対応）
             for result in results:
                 new_quote_data = {
-                    "氏名": result.get("氏名", ""),
-                    "生年月日": result.get("生年月日", ""),
-                    "保険会社名": result.get("保険会社名", ""),
-                    "保険期間": result.get("保険期間", ""),
-                    "保険金額": result.get("保険金額", ""),
-                    "補償内容": result.get("補償内容", "")
+                    field: result.get(field, "") for field in st.session_state.get("extraction_fields", [])
                 }
                 st.session_state["comparison_df"] = pd.concat(
                     [st.session_state["comparison_df"], 
