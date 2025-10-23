@@ -390,14 +390,22 @@ with tab1:
                     if st.session_state["customer_df"] is None:
                         st.session_state["customer_df"] = pd.DataFrame(columns=["氏名", "年齢", "既存保険会社名", "既存保険期間", "既存保険金額", "既存補償内容"])
                     
+                    # 抽出した情報を顧客情報に追加する箇所を修正
                     new_customer_data = {
-                        "氏名": "既存顧客（要更新）",
-                        "年齢": "不明",
+                        "氏名": extracted_info.get("氏名", ""),  # 空文字列をデフォルト値として使用
+                        "生年月日": extracted_info.get("生年月日", ""),  # 空文字列をデフォルト値として使用
                         "既存保険会社名": extracted_info.get("保険会社名", ""),
                         "既存保険期間": extracted_info.get("保険期間", ""),
                         "既存保険金額": extracted_info.get("保険金額", ""),
                         "既存補償内容": extracted_info.get("補償内容", ""),
                     }
+
+                    # 初期化時のカラム定義も更新
+                    if st.session_state["customer_df"] is None:
+                        st.session_state["customer_df"] = pd.DataFrame(
+                            columns=["氏名", "生年月日", "既存保険会社名", "既存保険期間", "既存保険金額", "既存補償内容"]
+                        )
+                    
                     new_row_df = pd.DataFrame([new_customer_data])
                     st.session_state["customer_df"] = pd.concat([st.session_state["customer_df"], new_row_df], ignore_index=True)
                     st.success("抽出した情報を顧客情報に追加しました。")
