@@ -54,6 +54,7 @@ def extract_insurance_info_with_gemini_vision(pdf_bytes):
     )
 
     contents = [
+
         {"text": (
             "以下の保険見積書の内容から、氏名、生年月日、保険会社名、保険期間、保険金額、補償内容を抽出してください。"
             "抽出した情報はJSON形式で出力してください。"
@@ -462,40 +463,66 @@ st.markdown('<div class="section-header">📄 3. 見積書PDFから情報抽出<
 
 st.markdown('<div class="info-box">💡 保険会社からダウンロードした見積書PDFをアップロードし、情報を抽出して比較表に追加します。</div>', unsafe_allow_html=True)
 
-# フォルダ指定による一括処理
-st.subheader("フォルダ内のPDFファイルを一括処理")
-folder_path_input = st.text_input(
-    "PDFファイルが保存されているフォルダパスを入力",
-    placeholder="/path/to/pdfs または C:/Users/YourName/Documents/PDFs",
-    help="Windows形式のパス (C:\\Users\\...) も使用可能です"
+# フォルダ指定による一括処理を複数ファイルアップローダーに変更
+st.subheader("複数のPDFファイルを一括処理")
+uploaded_files = st.file_uploader(
+    "PDFファイルを複数選択してアップロード",
+    type=["pdf"],
+    accept_multiple_files=True,
+    help="Ctrl キーを押しながら複数のファイルを選択できます"
 )
 
-if folder_path_input:
-    if st.button("フォルダ内のPDFを処理", key="process_folder"):
-        normalized_path = os.path.normpath(folder_path_input).replace("\\", "/")
-        st.info(f"処理フォルダ: {normalized_path}")
+if uploaded_files:
+    if st.button("選択したPDFファイルを処理", key="process_files"):
+        results = []
+        progress_bar = st.progress(0)
+        status_text = st.empty()
         
-        with st.spinner("PDFファイルを処理中..."):
-            results = process_pdf_folder(normalized_path)
+        for idx, pdf_file in enumerate(uploaded_files):
+            status_text.text(f"処理中: {pdf_file.name} ({idx + 1}/{len(uploaded_files)})")
             
-            if results:
-                st.success(f"{len(results)}件のPDFから情報を抽出しました")
+            try:
+                # PDFバイトを直接処理
+                pdf_bytes = pdf_file.read()
+                extracted_info_str = extract_insurance_info_with_gemini_vision(pdf_bytes)
                 
-                # 比較表に追加
-                for result in results:
-                    new_quote_data = {
-                        "氏名": result.get("氏名", ""),
-                        "生年月日": result.get("生年月日", ""),
-                        "保険会社名": result.get("保険会社名", ""),
-                        "保険期間": result.get("保険期間", ""),
-                        "保険金額": result.get("保険金額", ""),
-                        "補償内容": result.get("補償内容", "")
-                    }
-                    st.session_state["comparison_df"] = pd.concat(
-                        [st.session_state["comparison_df"], 
-                         pd.DataFrame([new_quote_data])], 
-                        ignore_index=True
-                    )
+                # JSON形式の処理
+                if isinstance(extracted_info_str, str):
+                    if extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
+                        extracted_info_str = extracted_info_str[len("```json\n"):-len("\n```")]
+                    try:
+                        extracted_info = json.loads(extracted_info_str)
+                        extracted_info["ファイル名"] = pdf_file.name
+                        results.append(extracted_info)
+                    except json.JSONDecodeError:
+                        st.error(f"JSONパースエラー: {pdf_file.name}")
+                        continue
+            
+            except Exception as e:
+                st.error(f"{pdf_file.name} の処理中にエラー: {str(e)}")
+            
+            progress_bar.progress((idx + 1) / len(uploaded_files))
+        
+        status_text.text("処理完了")
+        
+        if results:
+            st.success(f"{len(results)}件のPDFから情報を抽出しました")
+            
+            # 比較表に追加
+            for result in results:
+                new_quote_data = {
+                    "氏名": result.get("氏名", ""),
+                    "生年月日": result.get("生年月日", ""),
+                    "保険会社名": result.get("保険会社名", ""),
+                    "保険期間": result.get("保険期間", ""),
+                    "保険金額": result.get("保険金額", ""),
+                    "補償内容": result.get("補償内容", "")
+                }
+                st.session_state["comparison_df"] = pd.concat(
+                    [st.session_state["comparison_df"], 
+                     pd.DataFrame([new_quote_data])], 
+                    ignore_index=True
+                )
 
 st.markdown("---")
 
