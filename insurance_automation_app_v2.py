@@ -43,7 +43,7 @@ st.sidebar.write("st.secrets に GEMINI_API_KEY が存在するか:", secrets_ha
 st.sidebar.write("poppler (pdftoppm) available:", POPPLER_AVAILABLE)
 
 # モデル初期化（参考用）
-model = "gemini-2.5-flash"
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 st.set_page_config(page_title="保険業務自動化アシスタント", layout="wide")
 # ---- セッション状態の初期化（必須）----
@@ -133,13 +133,9 @@ def convert_pdf_to_images(pdf_path_or_bytes):
         raise RuntimeError(f"{e}\n\n{hint}")
 
 def extract_insurance_info_with_gemini_vision(images):
-    """Gemini Vision APIを使用してPDFから保険情報を抽出"""
+    """Gemini Vision APIを使用してPDFから保険情報を抽出（GenerativeModel を使用）"""
     if not GEMINI_ENABLED:
         raise RuntimeError("GEMINI_API_KEY が設定されていないため、Gemini API 呼び出しはできません。")
-
-    messages = [
-        {"role": "system", "content": "あなたは保険見積書から情報を抽出するアシスタントです。"}
-    ]
 
     user_content = [
         {
@@ -152,11 +148,10 @@ def extract_insurance_info_with_gemini_vision(images):
         }
     ]
 
-    for i, image in enumerate(images):
+    for image in images:
         byte_arr = io.BytesIO()
         image.save(byte_arr, format='PNG')
         encoded_image = base64.b64encode(byte_arr.getvalue()).decode('utf-8')
-
         user_content.append({
             "type": "image_url",
             "image_url": {
@@ -164,42 +159,24 @@ def extract_insurance_info_with_gemini_vision(images):
             }
         })
 
-    messages.append({"role": "user", "content": user_content})
-
-    # Google Generative AI Python SDK 呼び出し（genai オブジェクトを使用）
     try:
-        response = genai.chat.completions.create(
-            model=model,
-            messages=messages,
-            response_format={"type": "json_object"}
+        response = model.generate_content(
+            user_content,
+            generation_config={"response_mime_type": "application/json"}
         )
     except Exception as e:
         raise RuntimeError(f"Gemini API 呼び出し中にエラーが発生しました: {e}")
 
-    # 応答の取り出し
     try:
-        # 応答の形式により取り出し方が変わる可能性があるため安全に抽出
-        content = None
-        # response がオブジェクトの場合
-        if hasattr(response, "choices") and len(response.choices) > 0:
-            # choice が message を持つ場合
-            choice = response.choices[0]
-            if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                content = choice.message.content
+        # SDK の戻り値からテキストを取得（.text があればそれを使う）
+        text = getattr(response, "text", None)
+        if text is None:
+            # dict やその他の形式へフォールバック
+            if isinstance(response, dict):
+                text = response.get("text") or response.get("output_text") or json.dumps(response, ensure_ascii=False)
             else:
-                # 辞書形式のとき
-                content = getattr(choice, "content", None) or choice.get("content") if isinstance(choice, dict) else None
-        elif isinstance(response, dict):
-            # dict 形式の場合をカバー
-            choices = response.get("choices", [])
-            if choices:
-                msg = choices[0].get("message") or choices[0]
-                content = msg.get("content") if isinstance(msg, dict) else None
-
-        if content is None:
-            raise RuntimeError("Gemini API の応答からコンテンツを取得できませんでした。")
-
-        return content
+                text = str(response)
+        return text
     except Exception as e:
         raise RuntimeError(f"Gemini 応答の解析中にエラーが発生しました: {e}")
 
