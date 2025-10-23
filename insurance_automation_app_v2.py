@@ -1,3 +1,67 @@
+import PyPDF2
+from PIL import Image
+import io
+import os
+import json
+from pdf2image import convert_from_path, convert_from_bytes
+import base64
+import google.generativeai as genai
+import streamlit as st
+import shutil
+
+# GEMINI_API_KEY を取得 (Streamlit の st.secrets を優先)
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
+
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    GEMINI_ENABLED = True
+else:
+    GEMINI_ENABLED = False
+
+# poppler の確認
+POPPLER_AVAILABLE = shutil.which("pdftoppm") is not None
+
+# モデル初期化
+model = genai.GenerativeModel("gemini-1.5-flash")
+
+def extract_insurance_info_with_gemini_vision(pdf_bytes):
+    """PDFバイト列から保険情報を抽出"""
+    if not GEMINI_ENABLED:
+        raise RuntimeError("GEMINI_API_KEY が設定されていないため、Gemini API を利用できません。")
+
+    # PDFバイト列から画像に変換
+    try:
+        images = convert_from_bytes(pdf_bytes)
+    except Exception as e:
+        raise RuntimeError(f"PDF の変換中にエラーが発生しました: {e}")
+
+    # プロンプトとコンテンツの準備
+    prompt = (
+        "以下の保険見積書の内容から、保険会社名、保険期間、保険金額、補償内容を抽出してください。"
+        "抽出した情報はJSON形式で出力してください。"
+    )
+
+    contents = [
+        {"text": prompt},
+        {"text": '例: {"保険会社名": "架空保険株式会社", "保険期間": "2025年10月1日～2026年9月30日", "保険金額": "10,000,000円", "補償内容": "入院日額5,000円"}'}
+    ]
+
+    # 画像の追加
+    for image in images:
+        byte_arr = io.BytesIO()
+        image.save(byte_arr, format='PNG')
+        encoded_image = base64.b64encode(byte_arr.getvalue()).decode('utf-8')
+        contents.append({
+            "mime_type": "image/png",
+            "data": encoded_image
+        })
+
+    try:
+        response = model.generate_content(contents)
+        return response.text
+    except Exception as e:
+        raise RuntimeError(f"Gemini API 呼び出し中にエラーが発生しました: {e}")
+
 import streamlit as st
 import pandas as pd
 import os
@@ -10,6 +74,7 @@ import glob
 import sys
 import google.generativeai as genai
 import shutil
+import PyPDF2
 
 # GEMINI_API_KEY を取得 (Streamlit の st.secrets を優先し、環境変数をフォールバック)
 GEMINI_API_KEY = None
@@ -132,53 +197,46 @@ def convert_pdf_to_images(pdf_path_or_bytes):
         )
         raise RuntimeError(f"{e}\n\n{hint}")
 
-def extract_insurance_info_with_gemini_vision(images):
-    """Gemini Vision APIを使用してPDFから保険情報を抽出（GenerativeModel を使用）"""
+def extract_insurance_info_with_gemini_vision(pdf_bytes_or_images):
+    """PDFバイト列または画像リストから保険情報を抽出"""
     if not GEMINI_ENABLED:
         raise RuntimeError("GEMINI_API_KEY が設定されていないため、Gemini API 呼び出しはできません。")
 
-    user_content = [
-        {
-            "type": "text",
-            "text": "以下の保険見積書の内容から、保険会社名、保険期間、保険金額、補償内容を抽出してください。抽出した情報はJSON形式で出力してください。"
-        },
-        {
-            "type": "text",
-            "text": '例: {"保険会社名": "架空保険株式会社", "保険期間": "2025年10月1日～2026年9月30日", "保険金額": "10,000,000円", "補償内容": "入院日額5,000円"}'
-        }
-    ]
+    # テキスト抽出を試みる
+    extracted_text = ""
+    if isinstance(pdf_bytes_or_images, (bytes, bytearray)):
+        try:
+            reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes_or_images))
+            pages = []
+            for p in reader.pages:
+                txt = p.extract_text()
+                if txt:
+                    pages.append(txt)
+            extracted_text = "\n\n".join(pages).strip()
+        except Exception:
+            extracted_text = ""
 
-    for image in images:
-        byte_arr = io.BytesIO()
-        image.save(byte_arr, format='PNG')
-        encoded_image = base64.b64encode(byte_arr.getvalue()).decode('utf-8')
-        user_content.append({
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/png;base64,{encoded_image}"
-            }
-        })
+    # プロンプト作成
+    base_prompt = (
+        "以下の保険見積書の内容から、保険会社名、保険期間、保険金額、補償内容を抽出してください。"
+        "抽出した情報はJSON形式で出力してください。"
+        '例: {"保険会社名": "架空保険株式会社", "保険期間": "2025年10月1日～2026年9月30日", "保険金額": "10,000,000円", "補償内容": "入院日額5,000円"}'
+    )
+
+    if extracted_text:
+        prompt_text = base_prompt + "\n\n抽出対象の本文:\n" + extracted_text
+    else:
+        raise RuntimeError(
+            "PDF からテキストを抽出できませんでした（画像ベースのPDFの可能性があります）。"
+            "テキスト版PDFをアップロードしてください。"
+        )
 
     try:
-        response = model.generate_content(
-            user_content,
-            generation_config={"response_mime_type": "application/json"}
-        )
+        # Gemini API 呼び出し（正しい形式）
+        response = model.generate_content(prompt_text)
+        return response.text
     except Exception as e:
         raise RuntimeError(f"Gemini API 呼び出し中にエラーが発生しました: {e}")
-
-    try:
-        # SDK の戻り値からテキストを取得（.text があればそれを使う）
-        text = getattr(response, "text", None)
-        if text is None:
-            # dict やその他の形式へフォールバック
-            if isinstance(response, dict):
-                text = response.get("text") or response.get("output_text") or json.dumps(response, ensure_ascii=False)
-            else:
-                text = str(response)
-        return text
-    except Exception as e:
-        raise RuntimeError(f"Gemini 応答の解析中にエラーが発生しました: {e}")
 
 def process_pdf_folder(folder_path):
     """指定フォルダ内のすべてのPDFファイルを処理"""
@@ -199,8 +257,7 @@ def process_pdf_folder(folder_path):
             # PDFをバイトで読み込み、convert_from_bytes を使って変換（ファイルパス依存問題を回避）
             with open(pdf_file, "rb") as f:
                 pdf_bytes = f.read()
-            images = convert_pdf_to_images(pdf_bytes)
-            extracted_info_str = extract_insurance_info_with_gemini_vision(images)
+            extracted_info_str = extract_insurance_info_with_gemini_vision(pdf_bytes)
             
             if isinstance(extracted_info_str, str) and extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
                 extracted_info_str = extracted_info_str[len("```json\n"):-len("\n```")]
@@ -255,7 +312,7 @@ with col1:
     if customer_info_file:
         st.session_state["customer_df"] = pd.read_excel(customer_info_file)
         st.markdown('<div class="success-box">✅ 顧客情報.xlsx が正常に読み込まれました。</div>', unsafe_allow_html=True)
-        st.dataframe(st.session_state["customer_df"], use_container_width=True)
+        st.dataframe(st.session_state["customer_df"], width='stretch')  # 修正
 
 with col2:
     st.subheader("見積サイト情報.xlsx")
@@ -263,7 +320,10 @@ with col2:
     if quote_site_info_file:
         st.session_state["site_df"] = pd.read_excel(quote_site_info_file)
         st.markdown('<div class="success-box">✅ 見積サイト情報.xlsx が正常に読み込まれました。</div>', unsafe_allow_html=True)
-        st.dataframe(st.session_state["site_df"], use_container_width=True)
+        st.dataframe(st.session_state["site_df"], width='stretch')  # 修正
+
+# 顧客情報の表示部分
+st.dataframe(st.session_state["customer_df"], width='stretch')  # 修正
 
 # --- セクション2: 顧客情報入力 / 既存保険PDFからの情報抽出 ---
 st.markdown('<div class="section-header">📋 2. 顧客情報管理</div>', unsafe_allow_html=True)
@@ -281,7 +341,7 @@ with tab1:
                     # 一時ファイルとして保存せずに bytes を直接処理
                     pdf_bytes = existing_insurance_pdf.getvalue()
                     images = convert_pdf_to_images(pdf_bytes)
-                    extracted_info_str = extract_insurance_info_with_gemini_vision(images)
+                    extracted_info_str = extract_insurance_info_with_gemini_vision(pdf_bytes)
                     
                     # JSON文字列をパース
                     if isinstance(extracted_info_str, str) and extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
@@ -371,7 +431,7 @@ if quote_pdf:
             try:
                 pdf_bytes = quote_pdf.getvalue()
                 images = convert_pdf_to_images(pdf_bytes)
-                extracted_info_str = extract_insurance_info_with_gemini_vision(images)
+                extracted_info_str = extract_insurance_info_with_gemini_vision(pdf_bytes)
                 
                 if isinstance(extracted_info_str, str) and extracted_info_str.startswith("```json") and extracted_info_str.endswith("```"):
                     extracted_info_str = extracted_info_str[len("```json\n"):-len("\n```")]
@@ -398,7 +458,7 @@ if quote_pdf:
 st.markdown('<div class="section-header">📊 4. 見積情報比較表</div>', unsafe_allow_html=True)
 
 if not st.session_state["comparison_df"].empty:
-    st.dataframe(st.session_state["comparison_df"], use_container_width=True)
+    st.dataframe(st.session_state["comparison_df"], width='stretch')  # 修正
     
     # Excelダウンロード機能
     output = io.BytesIO()
