@@ -155,6 +155,10 @@ if "auto_process_done" not in st.session_state:
     st.session_state["auto_process_done"] = False
 
 
+# セッション状態に抽出項目を保存
+if "extraction_fields" not in st.session_state:
+    st.session_state["extraction_fields"] = []
+
 # カスタムCSS
 st.markdown("""
 <style>
@@ -229,6 +233,29 @@ def extract_insurance_info_with_gemini_vision(pdf_bytes_or_images):
     if not GEMINI_ENABLED:
         raise RuntimeError("GEMINI_API_KEY が設定されていないため、Gemini API 呼び出しはできません。")
 
+    # 抽出項目を取得（動的）
+    fields = st.session_state.get("extraction_fields", [
+        "氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"
+    ])
+    
+    # JSON例を動的に生成
+    example_values = {
+        "氏名": "山田太郎",
+        "生年月日": "1980年1月1日",
+        "保険会社名": "架空保険株式会社",
+        "保険期間": "2025年10月1日～2026年9月30日",
+        "保険金額": "10,000,000円",
+        "補償内容": "入院日額5,000円"
+    }
+    example_json = {field: example_values.get(field, "") for field in fields}
+
+    # プロンプトを動的に生成
+    base_prompt = (
+        f"以下の保険見積書の内容から、{', '.join(fields)}を抽出してください。"
+        "抽出した情報はJSON形式で出力してください。"
+        f'例: {json.dumps(example_json, ensure_ascii=False)}'
+    )
+
     # テキスト抽出を試みる
     extracted_text = ""
     if isinstance(pdf_bytes_or_images, (bytes, bytearray)):
@@ -242,20 +269,6 @@ def extract_insurance_info_with_gemini_vision(pdf_bytes_or_images):
             extracted_text = "\n\n".join(pages).strip()
         except Exception:
             extracted_text = ""
-
-    # プロンプト作成
-    base_prompt = (
-        "以下の保険見積書の内容から、氏名、生年月日、保険会社名、保険期間、保険金額、補償内容を抽出してください。"
-        "抽出した情報はJSON形式で出力してください。"
-        '例: {'
-        '"氏名": "山田太郎", '
-        '"生年月日": "1980年1月1日", '
-        '"保険会社名": "架空保険株式会社", '
-        '"保険期間": "2025年10月1日～2026年9月30日", '
-        '"保険金額": "10,000,000円", '
-        '"補償内容": "入院日額5,000円"'
-        '}'
-    )
 
     if extracted_text:
         prompt_text = base_prompt + "\n\n抽出対象の本文:\n" + extracted_text
@@ -367,13 +380,41 @@ st.markdown('<div class="section-header">📁 1. 事前ファイル準備</div>'
 
 col1, col2 = st.columns(2)
 
+# 抽出項目を取得する関数
+def get_extraction_fields_from_excel(df):
+    """顧客情報.xlsxから抽出項目を取得"""
+    if df is None:
+        return ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]  # デフォルト値
+    
+    try:
+        # 「抽出項目」シートがあれば、その列名を使用
+        if "抽出項目" in df.keys():
+            fields = df["抽出項目"].columns.tolist()
+            if fields:
+                return fields
+    except Exception:
+        pass
+    
+    # シートが見つからない場合はデフォルト値を返す
+    return ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
+
 with col1:
     st.subheader("顧客情報.xlsx")
     customer_info_file = st.file_uploader("顧客情報.xlsx をアップロード", type=["xlsx"], key="customer_file")
     if customer_info_file:
-        st.session_state["customer_df"] = pd.read_excel(customer_info_file)
+        # 全シートを読み込む
+        excel_data = pd.read_excel(customer_info_file, sheet_name=None)
+        st.session_state["customer_df"] = excel_data.get("顧客情報", pd.DataFrame())  # メインの顧客情報
+        
+        # 抽出項目を更新
+        st.session_state["extraction_fields"] = get_extraction_fields_from_excel(excel_data)
+        
         st.markdown('<div class="success-box">✅ 顧客情報.xlsx が正常に読み込まれました。</div>', unsafe_allow_html=True)
-        st.dataframe(st.session_state["customer_df"], width='stretch')  # 修正
+        st.dataframe(st.session_state["customer_df"], width='stretch')
+        
+        # 抽出項目の確認表示
+        st.markdown("**設定された抽出項目:**")
+        st.write(", ".join(st.session_state["extraction_fields"]))
 
 with col2:
     st.subheader("見積サイト情報.xlsx")
