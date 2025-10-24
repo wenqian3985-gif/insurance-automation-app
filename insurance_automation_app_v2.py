@@ -1,52 +1,88 @@
-# app_insurance_automation.py
+# app_insurance_automation_auth.py
+
 import os
 import io
 import json
 import base64
 import glob
 import shutil
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
 import streamlit as st
 import pandas as pd
-
-# PDF関連
-import PyPDF2
-from pdf2image import convert_from_bytes, convert_from_path
 from PIL import Image
-
-# Gemini SDK
+import PyPDF2
+from pdf2image import convert_from_bytes
 import google.generativeai as genai
+import streamlit_authenticator as stauth
+import yaml
 
+# ==========================================================
+# 🔐 認証設定
+# ==========================================================
 
-# ========== 基本設定 ==========
-st.set_page_config(
-    page_title="保険業務自動化アシスタント",
-    layout="wide",
-)
+st.set_page_config(page_title="保険業務自動化アシスタント", layout="wide")
 
-st.markdown(
-    """
-<style>
-html, body, [class*="css"] {
-  font-family: "Noto Sans JP","Meiryo","Yu Gothic",sans-serif;
-}
-.main-header { font-size: 2rem; font-weight: bold; color: #1f77b4; text-align: center; margin-bottom: 1rem; }
-.section-header { font-size: 1.3rem; font-weight: bold; color: #ff7f0e; margin-top: 1.5rem; margin-bottom: .6rem; }
-.success-box { background:#d4edda; padding:.8rem; border-left:4px solid #28a745; margin:.5rem 0; }
-.info-box { background:#d1ecf1; padding:.8rem; border-left:4px solid #17a2b8; margin:.5rem 0; }
-</style>
-""",
-    unsafe_allow_html=True,
-)
+# --- 認証 ---
+try:
+    authenticator = stauth.Authenticate(
+        credentials=st.secrets["credentials"],
+        cookie_name=st.secrets["cookie"]["name"],
+        key=st.secrets["cookie"]["key"],
+        cookie_expiry_days=st.secrets["cookie"]["expiry_days"]
+    )
+except Exception as e:
+    st.error(f"認証設定に問題があります: {e}")
+    st.stop()
 
-st.markdown('<div class="main-header">🏥 保険業務自動化アシスタント</div>', unsafe_allow_html=True)
+name, auth_status, username = authenticator.login("ログイン", "main")
 
+if auth_status is False:
+    st.error("ユーザー名またはパスワードが違います。")
+    st.stop()
+elif auth_status is None:
+    st.warning("ログインしてください。")
+    st.stop()
 
-# ========== ヘルパー関数群 ==========
+authenticator.logout("ログアウト", "sidebar")
+st.sidebar.success(f"{name} さんでログイン中")
+
+# ==========================================================
+# 👤 管理者専用ページ：ユーザー追加フォーム
+# ==========================================================
+
+if username == "admin":
+    with st.sidebar.expander("⚙️ 管理者メニュー"):
+        if st.button("🧑‍💼 ユーザー追加ページを開く"):
+            st.session_state["show_user_manager"] = True
+
+if st.session_state.get("show_user_manager"):
+    st.title("👤 ユーザー管理（管理者専用）")
+    new_user = st.text_input("ユーザー名")
+    new_name = st.text_input("表示名")
+    new_pass = st.text_input("パスワード", type="password")
+
+    if st.button("登録用YAMLを生成"):
+        if new_user and new_pass:
+            hashed = stauth.Hasher([new_pass]).generate()[0]
+            new_yaml = {
+                "usernames": {
+                    new_user: {"name": new_name, "password": hashed}
+                }
+            }
+            yaml_str = yaml.dump(new_yaml, allow_unicode=True, sort_keys=False)
+            st.code(yaml_str, language="yaml")
+            st.success("✅ 上記YAMLをSecretsの`credentials.usernames`下に追加してください。")
+        else:
+            st.warning("ユーザー名とパスワードを入力してください。")
+
+    st.stop()
+
+# ==========================================================
+# 🤖 Gemini 初期化
+# ==========================================================
 
 def get_api_key() -> Optional[str]:
-    """st.secrets または環境変数から GEMINI_API_KEY を取得"""
     try:
         if "GEMINI_API_KEY" in st.secrets:
             return st.secrets["GEMINI_API_KEY"]
@@ -54,63 +90,19 @@ def get_api_key() -> Optional[str]:
         pass
     return os.getenv("GEMINI_API_KEY")
 
+api_key = get_api_key()
+if not api_key:
+    st.error("GEMINI_API_KEY が設定されていません。")
+    st.stop()
 
-def poppler_available() -> bool:
-    """poppler（pdftoppm）が使えるか"""
-    return shutil.which("pdftoppm") is not None
+genai.configure(api_key=api_key)
+model = genai.GenerativeModel("gemini-2.5-flash")
 
-
-def init_gemini():
-    """
-    Geminiモデル初期化。
-    ・モデルは“必ず”軽量の flash 系に固定（デフォルト：gemini-2.5-flash）
-    ・Secrets/環境変数 GEMINI_MODEL があれば上書き可能（ただし pro/exp には落とさない想定）
-    """
-    api_key = get_api_key()
-    if not api_key:
-        return None, False, "GEMINI_API_KEY が未設定です"
-
-    # デフォルトは軽量モデルに固定
-    default_model = "gemini-2.5-flash"
-    try:
-        user_model = None
-        try:
-            user_model = st.secrets.get("GEMINI_MODEL", None)  # optional
-        except Exception:
-            user_model = None
-        user_model = user_model or os.getenv("GEMINI_MODEL")
-
-        model_name = (user_model or default_model)
-
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(model_name)
-        return model, True, model_name
-    except Exception as e:
-        return None, False, f"初期化エラー: {e}"
-
-
-def get_fields_from_excel(file, sheet_name_candidates=("顧客情報", "Sheet1")) -> List[str]:
-    """Excelファイルから列名だけを安全に抽出"""
-    try:
-        xls = pd.ExcelFile(file)
-        # シート選択
-        target = next((s for s in sheet_name_candidates if s in xls.sheet_names), xls.sheet_names[0])
-        # 最初に列を読む
-        df = pd.read_excel(file, sheet_name=target, nrows=0)
-        cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
-        if not cols:
-            tmp = pd.read_excel(file, sheet_name=target, header=None, nrows=5)
-            best_row = tmp.apply(lambda r: r.notnull().sum(), axis=1).idxmax()
-            df = pd.read_excel(file, sheet_name=target, header=best_row, nrows=0)
-            cols = [c for c in df.columns if not str(c).startswith("Unnamed")]
-        return [str(c).strip() for c in cols]
-    except Exception as e:
-        st.error(f"Excel列名取得エラー: {e}")
-        return []
-
+# ==========================================================
+# 🧰 共通関数
+# ==========================================================
 
 def read_pdf_text(pdf_bytes: bytes) -> str:
-    """PyPDF2でPDFテキストを抽出"""
     try:
         reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
         text = "\n\n".join([p.extract_text() or "" for p in reader.pages])
@@ -118,186 +110,80 @@ def read_pdf_text(pdf_bytes: bytes) -> str:
     except Exception:
         return ""
 
-
-def pdf_to_images(pdf_bytes: bytes, max_pages: int = 2) -> List[Image.Image]:
-    """PDF→画像変換（トークン節約のため先頭max_pages枚まで）"""
-    images = convert_from_bytes(pdf_bytes)
-    if max_pages and len(images) > max_pages:
-        images = images[:max_pages]
-    return images
-
+def pdf_to_images(pdf_bytes: bytes) -> List[Image.Image]:
+    return convert_from_bytes(pdf_bytes)
 
 def safe_append(df: pd.DataFrame, record: Dict) -> pd.DataFrame:
-    """DataFrameへ1行安全追加"""
     new_row = {col: record.get(col, "") for col in df.columns}
     return pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
+# ==========================================================
+# 🏥 アプリ本体：保険業務自動化
+# ==========================================================
 
-def extract_json_string_from_response(response) -> str:
-    """
-    ★ 修正版の抽出処理部分（2.5向け）
-    - response.text が空でも candidates[].content.parts から取り出す
-    - ```json ... ``` のコードブロックを除去
-    - 文字列を返す（空なら ""）
-    """
-    raw = ""
-
-    # 1) まず response.text を優先
-    if hasattr(response, "text") and isinstance(response.text, str) and response.text.strip():
-        raw = response.text.strip()
-
-    # 2) 空なら candidates → parts を探索
-    if not raw and hasattr(response, "candidates") and response.candidates:
-        parts = getattr(response.candidates[0].content, "parts", None)
-        if parts:
-            # 最初のテキストパートを優先
-            for p in parts:
-                text = getattr(p, "text", None)
-                if isinstance(text, str) and text.strip():
-                    raw = text.strip()
-                    break
-
-    # 3) コードブロック除去（```json ... ``` or ``` ... ```）
-    if raw.startswith("```"):
-        # 先頭の```json or ``` を取り除く
-        lines = raw.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        # 末尾の ``` を取り除く
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        raw = "\n".join(lines).strip()
-
-    return raw
-
-
-# ========== 初期化 ==========
-
-model, GEMINI_ENABLED, model_info = init_gemini()
+st.markdown('<h2 style="color:#1f77b4;">🏥 保険業務自動化アシスタント</h2>', unsafe_allow_html=True)
 
 if "comparison_df" not in st.session_state:
     st.session_state["comparison_df"] = pd.DataFrame(
         columns=["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
     )
-if "extraction_fields" not in st.session_state:
-    st.session_state["extraction_fields"] = st.session_state["comparison_df"].columns.tolist()
 
-# Sidebar Debug
-st.sidebar.markdown("**Debug情報**")
-st.sidebar.write("GEMINI_ENABLED:", GEMINI_ENABLED)
-st.sidebar.write("使用モデル:", model_info)
-st.sidebar.write("poppler available:", poppler_available())
-if GEMINI_ENABLED:
-    try:
-        models = genai.list_models()
-        st.sidebar.markdown("**利用可能モデル（generateContent対応）**")
-        for m in models:
-            if "generateContent" in getattr(m, "supported_generation_methods", []):
-                st.sidebar.write("-", m.name)
-    except Exception as e:
-        st.sidebar.write("モデル一覧取得エラー:", e)
-
-if not GEMINI_ENABLED:
-    st.error("GEMINI_API_KEY が設定されていないため、Gemini連携は動作しません。")
-
-
-# ========== セクション1: 顧客情報.xlsx ==========
-st.markdown('<div class="section-header">📁 1. 事前ファイル準備</div>', unsafe_allow_html=True)
+# --- 顧客情報.xlsx アップロード ---
+st.header("📁 顧客情報アップロード")
 customer_file = st.file_uploader("顧客情報.xlsx をアップロード", type=["xlsx"])
 if customer_file:
-    fields = get_fields_from_excel(customer_file)
-    if fields:
-        st.session_state["extraction_fields"] = fields
-        st.session_state["comparison_df"] = pd.DataFrame(columns=fields)
-        st.success("✅ 列名を正常に取得しました。")
-        st.write("抽出対象:", ", ".join(fields))
-    else:
-        st.error("列名を取得できませんでした。")
+    try:
+        df = pd.read_excel(customer_file)
+        st.session_state["extraction_fields"] = df.columns.tolist()
+        st.session_state["comparison_df"] = pd.DataFrame(columns=df.columns.tolist())
+        st.success("✅ 顧客情報を読み込みました。")
+        st.dataframe(df, use_container_width=True)
+    except Exception as e:
+        st.error(f"Excel読み込みエラー: {e}")
 
-
-# ========== セクション2: PDFアップロード & 抽出 ==========
-st.markdown('<div class="section-header">📄 2. 見積書PDFから情報抽出</div>', unsafe_allow_html=True)
+# --- PDF情報抽出 ---
+st.header("📄 保険見積書PDFから情報抽出")
 uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True)
 
-if uploaded_pdfs and st.button("PDFから情報を抽出"):
-    if not GEMINI_ENABLED:
-        st.error("Gemini API が無効です。")
-    else:
-        progress = st.progress(0)
-        total = len(uploaded_pdfs)
-        results = []
+if uploaded_pdfs and st.button("情報を抽出"):
+    results = []
+    progress = st.progress(0)
+    for i, pdf in enumerate(uploaded_pdfs, start=1):
+        st.info(f"{pdf.name} を処理中 ({i}/{len(uploaded_pdfs)})")
+        try:
+            pdf_bytes = pdf.read()
+            text = read_pdf_text(pdf_bytes)
+            fields = st.session_state.get("extraction_fields", ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"])
+            example_json = {f: "" for f in fields}
+            prompt = (
+                f"以下の保険見積書から {', '.join(fields)} を抽出し、日本語JSONで返してください。"
+                f"不明な項目は空文字で。例: {json.dumps(example_json, ensure_ascii=False)}"
+            )
+            response = model.generate_content(prompt + "\n\n" + text)
+            data = json.loads(response.text)
+            data["ファイル名"] = pdf.name
+            results.append(data)
+            st.session_state["comparison_df"] = safe_append(st.session_state["comparison_df"], data)
+            st.success(f"✅ {pdf.name} の情報を抽出しました。")
+        except Exception as e:
+            st.error(f"❌ {pdf.name} の抽出エラー: {e}")
+        progress.progress(i / len(uploaded_pdfs))
 
-        for i, pdf in enumerate(uploaded_pdfs, start=1):
-            st.info(f"処理中: {pdf.name} ({i}/{total})")
-            try:
-                pdf_bytes = pdf.read()
-                text = read_pdf_text(pdf_bytes)
-
-                # 抽出項目設定
-                fields = st.session_state["extraction_fields"]
-                # 空文字例（不明は空文字で返させる）
-                example_json = {f: "" for f in fields}
-                prompt = (
-                    f"以下の保険見積書から {', '.join(fields)} を抽出し、日本語の有効なJSON（オブジェクト）で返してください。"
-                    f"不明な項目は空文字にしてください。例: {json.dumps(example_json, ensure_ascii=False)}"
-                )
-
-                # --- API呼び出し直前のモデル指定は init_gemini() で flash 固定済み ---
-                # 画像送信はトークン節約のため先頭2ページまで
-                if text:
-                    response = model.generate_content(prompt + "\n\n" + text)
-                else:
-                    if not poppler_available():
-                        raise RuntimeError("poppler-utils が必要です。packages.txt に追加してください。")
-                    images = pdf_to_images(pdf_bytes, max_pages=2)
-                    parts = [prompt]
-                    for img in images:
-                        buf = io.BytesIO()
-                        img.save(buf, format="PNG")
-                        parts.append({"mime_type": "image/png", "data": buf.getvalue()})
-                    response = model.generate_content(parts)
-
-                # ★ 修正版の抽出処理部分（安全な取り出し・コードブロック除去）
-                raw_str = extract_json_string_from_response(response)
-                if not raw_str:
-                    raise ValueError("Geminiから空の応答を受け取りました。PDF内容やサイズをご確認ください。")
-
-                try:
-                    data = json.loads(raw_str)
-                except json.JSONDecodeError as je:
-                    st.sidebar.error(f"[{pdf.name}] JSONデコードエラー: {je}")
-                    st.sidebar.code(raw_str, language="json")
-                    raise ValueError("JSONのパースに失敗しました。応答形式をご確認ください。")
-
-                # ファイル名付与＆格納
-                if isinstance(data, dict):
-                    data["ファイル名"] = pdf.name
-                    results.append(data)
-                    st.success(f"✅ {pdf.name} 抽出成功")
-                    st.session_state["comparison_df"] = safe_append(st.session_state["comparison_df"], data)
-                else:
-                    raise ValueError("Geminiの応答がJSONオブジェクトではありません。")
-
-            except Exception as e:
-                st.error(f"❌ {pdf.name} 抽出エラー: {e}")
-            progress.progress(i / total)
-
-
-# ========== セクション3: 結果表示・ダウンロード ==========
-st.markdown('<div class="section-header">📊 3. 見積情報比較表</div>', unsafe_allow_html=True)
+# --- 比較表表示 ---
+st.header("📊 見積情報比較表")
 if not st.session_state["comparison_df"].empty:
     st.dataframe(st.session_state["comparison_df"], use_container_width=True)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        st.session_state["comparison_df"].to_excel(writer, index=False, sheet_name="見積情報比較表")
+        st.session_state["comparison_df"].to_excel(writer, index=False, sheet_name="比較表")
     st.download_button(
         "📥 Excelでダウンロード",
         data=output.getvalue(),
         file_name="見積情報比較表.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 else:
-    st.info("まだPDFから抽出された情報はありません。")
+    st.info("PDFをアップロードして情報を抽出してください。")
 
 st.markdown("---")
-st.markdown("**保険業務自動化アシスタント** | Powered by Streamlit × Gemini")
+st.markdown("**保険業務自動化アシスタント** | Secure Access by Streamlit Authenticator")
