@@ -2,7 +2,7 @@ credentials:
   usernames:
     admin:
       name: "管理者"
-      password: "$2b$12$Pq4o0bWZyb..."  # あなたが生成したbcryptのハッシュ値
+      password: "$2b$12$g869MgWj8AsP7UTmHatwtuE67Lbt6.RQ.cCt3PMCvkG1SaCTUDzem"  # あなたが生成したbcryptのハッシュ値
 
 cookie:
   name: "insurance_auth"
