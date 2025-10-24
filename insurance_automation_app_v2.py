@@ -12,7 +12,7 @@ import yaml
 import streamlit_authenticator as stauth
 
 # ======================
-# 環境設定・スタイル
+# 環境設定・デザイン
 # ======================
 os.environ["STREAMLIT_WATCHDOG_OBSERVER"] = "none"
 st.set_page_config(page_title="保険業務自動化アシスタント", layout="wide")
@@ -24,15 +24,14 @@ html, body, [class*="css"] {
 }
 .main-header { font-size: 2rem; font-weight: bold; color: #1f77b4; text-align: center; margin-bottom: 1rem; }
 .section-header { font-size: 1.3rem; font-weight: bold; color: #ff7f0e; margin-top: 1.5rem; margin-bottom: .6rem; }
-.success-box { background:#d4edda; padding:.8rem; border-left:4px solid #28a745; margin:.5rem 0; }
-.info-box { background:#d1ecf1; padding:.8rem; border-left:4px solid #17a2b8; margin:.5rem 0; }
 </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-header">🏥 保険業務自動化アシスタント</div>', unsafe_allow_html=True)
 
+
 # ======================
-# 認証設定の読み込み
+# config.yaml の読み込み
 # ======================
 try:
     with open("config.yaml", "r", encoding="utf-8") as file:
@@ -41,8 +40,9 @@ except Exception as e:
     st.error(f"認証設定の読み込みに失敗しました: {e}")
     st.stop()
 
+
 # ======================
-# Authenticator初期化
+# 認証の初期化
 # ======================
 try:
     authenticator = stauth.Authenticate(
@@ -52,45 +52,51 @@ try:
         cookie_expiry_days=config["cookie"]["expiry_days"],
     )
 except Exception as e:
-    st.error(f"ログイン画面の初期化に失敗しました。設定を確認してください。\n{e}")
+    st.error(f"ログイン画面の初期化に失敗しました: {e}")
     st.stop()
 
-# ======================
-# ログインフォーム表示
-# ======================
-authenticator.login(location="main")
 
 # ======================
-# ログイン判定
+# ログインフォーム
 # ======================
-if authenticator.authentication_status is False:
+name, authentication_status, username = authenticator.login("ログイン", "main")
+
+
+# ======================
+# 認証状態の分岐
+# ======================
+if authentication_status is False:
     st.error("ユーザー名またはパスワードが間違っています。")
     st.stop()
-elif authenticator.authentication_status is None:
+
+elif authentication_status is None:
     st.warning("ユーザー名とパスワードを入力してください。")
     st.stop()
 
+
 # ======================
-# ログイン成功後
+# ログイン成功後の画面
 # ======================
-if authenticator.authentication_status:
-    name = authenticator.username
+if authentication_status:
     st.success(f"ようこそ、{name}さん！")
     authenticator.logout("ログアウト", "sidebar")
+
+    st.markdown("---")
+    st.subheader("📄 保険自動化システム 管理画面")
 
     # ======================
     # GEMINI 初期化
     # ======================
     GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
     if not GEMINI_API_KEY:
-        st.error("GEMINI_API_KEY が設定されていません。Streamlit Secretsに登録してください。")
+        st.error("❌ GEMINI_API_KEY が設定されていません。Secretsに追加してください。")
         st.stop()
 
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel("gemini-2.5-flash")
 
     # ======================
-    # 関数定義
+    # PDF抽出関数
     # ======================
     def extract_text_from_pdf(pdf_bytes):
         """PDFからテキスト抽出"""
@@ -102,11 +108,11 @@ if authenticator.authentication_status:
             return ""
 
     def convert_pdf_to_images(pdf_bytes):
-        """PDFを画像リストに変換"""
+        """PDFを画像に変換"""
         return convert_from_bytes(pdf_bytes)
 
     def extract_info_with_gemini(pdf_bytes, fields):
-        """Geminiで情報抽出"""
+        """Gemini APIで情報抽出"""
         text = extract_text_from_pdf(pdf_bytes)
         example_json = {f: "" for f in fields}
 
@@ -124,7 +130,10 @@ if authenticator.authentication_status:
                 for img in images:
                     buf = io.BytesIO()
                     img.save(buf, format="PNG")
-                    contents.append({"mime_type": "image/png", "data": base64.b64encode(buf.getvalue()).decode("utf-8")})
+                    contents.append({
+                        "mime_type": "image/png",
+                        "data": base64.b64encode(buf.getvalue()).decode("utf-8")
+                    })
                 response = model.generate_content(contents)
 
             if not response or not response.text:
@@ -138,9 +147,6 @@ if authenticator.authentication_status:
     # ======================
     # アプリ本体
     # ======================
-    st.markdown("---")
-    st.subheader("📄 保険自動化システム 管理画面")
-
     st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード</div>', unsafe_allow_html=True)
     customer_file = st.file_uploader("顧客情報.xlsx をアップロード", type=["xlsx"])
     if customer_file:
