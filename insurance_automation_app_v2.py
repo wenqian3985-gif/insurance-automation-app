@@ -13,8 +13,9 @@ import yaml
 import streamlit_authenticator as stauth
 
 # ======================
-# 基本設定
+# 環境設定・スタイル
 # ======================
+os.environ["STREAMLIT_WATCHDOG_OBSERVER"] = "none"
 st.set_page_config(page_title="保険業務自動化アシスタント", layout="wide")
 
 st.markdown("""
@@ -31,13 +32,8 @@ html, body, [class*="css"] {
 
 st.markdown('<div class="main-header">🏥 保険業務自動化アシスタント</div>', unsafe_allow_html=True)
 
-
-import streamlit as st
-import yaml
-import streamlit_authenticator as stauth
-
 # ======================
-# 認証設定ファイルの読み込み
+# 認証設定の読み込み
 # ======================
 try:
     with open("config.yaml", "r", encoding="utf-8") as file:
@@ -47,7 +43,7 @@ except Exception as e:
     st.stop()
 
 # ======================
-# 認証初期化
+# Authenticator初期化
 # ======================
 try:
     authenticator = stauth.Authenticate(
@@ -65,156 +61,146 @@ except Exception as e:
 # ======================
 login_info = authenticator.login(location="main")
 
-# 未入力チェック
 if login_info is None:
     st.stop()
 
-# unpack
 name, authentication_status, username = login_info
 
 # ======================
-# 認証結果の処理
+# ログイン結果処理
 # ======================
 if authentication_status is False:
     st.error("ユーザー名またはパスワードが間違っています。")
-
+    st.stop()
 elif authentication_status is None:
     st.warning("ユーザー名とパスワードを入力してください。")
+    st.stop()
 
-elif authentication_status is True:
+# ======================
+# ログイン成功後
+# ======================
+if authentication_status is True:
     st.success(f"ようこそ、{name}さん！")
     authenticator.logout("ログアウト", "sidebar")
 
+    # ======================
+    # GEMINI 初期化
+    # ======================
+    GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
+    if not GEMINI_API_KEY:
+        st.error("GEMINI_API_KEY が設定されていません。Streamlit Secretsに登録してください。")
+        st.stop()
+
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    # ======================
+    # 関数定義
+    # ======================
+    def extract_text_from_pdf(pdf_bytes):
+        """PDFからテキスト抽出"""
+        try:
+            reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+            text = "\n\n".join([p.extract_text() or "" for p in reader.pages])
+            return text.strip()
+        except Exception:
+            return ""
+
+    def convert_pdf_to_images(pdf_bytes):
+        """PDFを画像リストに変換"""
+        return convert_from_bytes(pdf_bytes)
+
+    def extract_info_with_gemini(pdf_bytes, fields):
+        """Geminiで情報抽出"""
+        text = extract_text_from_pdf(pdf_bytes)
+        example_json = {f: "" for f in fields}
+
+        prompt = (
+            f"以下の保険見積書から {', '.join(fields)} を抽出し、日本語のJSONで返してください。\n"
+            f"不明な項目は空文字にしてください。例: {json.dumps(example_json, ensure_ascii=False)}"
+        )
+
+        try:
+            if text:
+                response = model.generate_content(prompt + "\n\n" + text)
+            else:
+                images = convert_pdf_to_images(pdf_bytes)
+                contents = [{"text": prompt}]
+                for img in images:
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    contents.append({"mime_type": "image/png", "data": base64.b64encode(buf.getvalue()).decode("utf-8")})
+                response = model.generate_content(contents)
+
+            if not response or not response.text:
+                raise ValueError("Geminiの応答が空です。")
+
+            clean_text = response.text.strip().strip("```json").strip("```").strip()
+            return json.loads(clean_text)
+        except Exception as e:
+            raise RuntimeError(f"PDF抽出エラー: {e}")
+
+    # ======================
+    # アプリ本体
+    # ======================
     st.markdown("---")
     st.subheader("📄 保険自動化システム 管理画面")
-    st.write("ここにPDF抽出やExcel出力など、アプリ本体の処理を追加できます。")
 
-    # 例: 簡単なアップロードテスト
-    uploaded_file = st.file_uploader("PDFファイルをアップロードしてください", type=["pdf"])
-    if uploaded_file:
-        st.write(f"アップロードされたファイル: {uploaded_file.name}")
+    st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード</div>', unsafe_allow_html=True)
 
-
-# ======================
-# GEMINI 初期化
-# ======================
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    st.error("GEMINI_API_KEY が設定されていません。Streamlit Secretsに登録してください。")
-    st.stop()
-
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.5-flash")
-
-# ======================
-# 関数定義
-# ======================
-def extract_text_from_pdf(pdf_bytes):
-    """PDFからテキスト抽出"""
-    try:
-        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
-        text = "\n\n".join([p.extract_text() or "" for p in reader.pages])
-        return text.strip()
-    except Exception:
-        return ""
-
-def convert_pdf_to_images(pdf_bytes):
-    """PDFを画像リストに変換"""
-    return convert_from_bytes(pdf_bytes)
-
-def extract_info_with_gemini(pdf_bytes, fields):
-    """Geminiで情報抽出"""
-    text = extract_text_from_pdf(pdf_bytes)
-    example_json = {f: "" for f in fields}
-
-    prompt = (
-        f"以下の保険見積書から {', '.join(fields)} を抽出し、日本語のJSONで返してください。\n"
-        f"不明な項目は空文字にしてください。例: {json.dumps(example_json, ensure_ascii=False)}"
-    )
-
-    try:
-        if text:
-            response = model.generate_content(prompt + "\n\n" + text)
-        else:
-            images = convert_pdf_to_images(pdf_bytes)
-            contents = [{"text": prompt}]
-            for img in images:
-                buf = io.BytesIO()
-                img.save(buf, format="PNG")
-                contents.append({"mime_type": "image/png", "data": base64.b64encode(buf.getvalue()).decode("utf-8")})
-            response = model.generate_content(contents)
-
-        if not response or not response.text:
-            raise ValueError("Geminiの応答が空です。")
-
-        clean_text = response.text.strip().strip("```json").strip("```").strip()
-        return json.loads(clean_text)
-    except Exception as e:
-        raise RuntimeError(f"PDF抽出エラー: {e}")
-
-# ======================
-# アプリ本体
-# ======================
-st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード</div>', unsafe_allow_html=True)
-
-customer_file = st.file_uploader("顧客情報.xlsx をアップロード", type=["xlsx"])
-if customer_file:
-    df_customer = pd.read_excel(customer_file)
-    st.session_state["fields"] = df_customer.columns.tolist()
-    st.success("✅ 顧客情報ファイルを読み込みました。")
-    st.dataframe(df_customer)
-else:
-    st.session_state["fields"] = ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
-
-# ======================
-# PDF処理セクション
-# ======================
-st.markdown('<div class="section-header">📄 2. 見積書PDFから情報抽出</div>', unsafe_allow_html=True)
-uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True)
-
-if uploaded_pdfs and st.button("PDFから情報を抽出"):
-    results = []
-    fields = st.session_state["fields"]
-
-    for pdf in uploaded_pdfs:
-        st.info(f"{pdf.name} を処理中...")
-        try:
-            pdf_bytes = pdf.read()
-            data = extract_info_with_gemini(pdf_bytes, fields)
-            data["ファイル名"] = pdf.name
-            results.append(data)
-            st.success(f"✅ {pdf.name} 抽出成功")
-        except Exception as e:
-            st.error(str(e))
-
-    if results:
-        df = pd.DataFrame(results)
-        st.session_state["comparison_df"] = df
-        st.dataframe(df, use_container_width=True)
+    customer_file = st.file_uploader("顧客情報.xlsx をアップロード", type=["xlsx"])
+    if customer_file:
+        df_customer = pd.read_excel(customer_file)
+        st.session_state["fields"] = df_customer.columns.tolist()
+        st.success("✅ 顧客情報ファイルを読み込みました。")
+        st.dataframe(df_customer)
     else:
-        st.warning("PDFから情報を抽出できませんでした。")
+        st.session_state["fields"] = ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
 
-# ======================
-# 結果ダウンロード
-# ======================
-st.markdown('<div class="section-header">📊 3. 抽出結果をダウンロード</div>', unsafe_allow_html=True)
-if "comparison_df" in st.session_state and not st.session_state["comparison_df"].empty:
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        st.session_state["comparison_df"].to_excel(writer, index=False, sheet_name="見積情報比較表")
-    st.download_button(
-        "📥 Excelでダウンロード",
-        data=output.getvalue(),
-        file_name="見積情報比較表.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-else:
-    st.info("まだ抽出結果はありません。")
+    # ======================
+    # PDF処理セクション
+    # ======================
+    st.markdown('<div class="section-header">📄 2. 見積書PDFから情報抽出</div>', unsafe_allow_html=True)
+    uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True)
 
-# ======================
-# ログアウトボタン
-# ======================
-authenticator.logout("ログアウト", "sidebar")
+    if uploaded_pdfs and st.button("PDFから情報を抽出"):
+        results = []
+        fields = st.session_state["fields"]
 
-st.markdown("---")
-st.markdown("**保険業務自動化アシスタント** | Secure Login + Gemini 2.5 Flash + Streamlit")
+        for pdf in uploaded_pdfs:
+            st.info(f"{pdf.name} を処理中...")
+            try:
+                pdf_bytes = pdf.read()
+                data = extract_info_with_gemini(pdf_bytes, fields)
+                data["ファイル名"] = pdf.name
+                results.append(data)
+                st.success(f"✅ {pdf.name} 抽出成功")
+            except Exception as e:
+                st.error(str(e))
+
+        if results:
+            df = pd.DataFrame(results)
+            st.session_state["comparison_df"] = df
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.warning("PDFから情報を抽出できませんでした。")
+
+    # ======================
+    # 結果ダウンロード
+    # ======================
+    st.markdown('<div class="section-header">📊 3. 抽出結果をダウンロード</div>', unsafe_allow_html=True)
+    if "comparison_df" in st.session_state and not st.session_state["comparison_df"].empty:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            st.session_state["comparison_df"].to_excel(writer, index=False, sheet_name="見積情報比較表")
+        st.download_button(
+            "📥 Excelでダウンロード",
+            data=output.getvalue(),
+            file_name="見積情報比較表.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.info("まだ抽出結果はありません。")
+
+    st.markdown("---")
+    st.markdown("**保険業務自動化アシスタント** | Secure Login + Gemini 2.5 Flash + Streamlit")
