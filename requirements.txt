@@ -16,3 +16,8 @@ protobuf>=4.25,<4.28
 
 # その他（任意）
 google-api-core==2.19.1
+
+# パスワード機能
+streamlit-authenticator
+bcrypt
+pyyaml
