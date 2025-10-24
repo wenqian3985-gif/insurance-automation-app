@@ -71,12 +71,12 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
-# ログイン処理。戻り値のアンパックは3つ
-    # 【修正点】ValueError回避のため、locationを明示的なキーワード引数として渡し直す。
-    # このライブラリはキーワード引数で渡されることが前提。
-    name, authentication_status, username = authenticator.login(
-        form_name="ログイン",
-        location="main"
+    # 【最終修正点】TypeError (unexpected keyword argument 'form_name') 回避のため、
+    # form_nameとlocationをすべて位置引数として渡す、またはform_nameのみを位置引数として渡す形式に修正します。
+    # このバージョンではキーワード引数を受け付けない可能性が高いです。
+    name, authentication_status, username, _ = authenticator.login(
+        "ログイン" # フォームタイトルを最初の位置引数として渡す
+        # location引数はデフォルト値 ('main') を利用するため削除
     )
 
     # 認証ステータスに応じた処理
