@@ -60,7 +60,7 @@ def poppler_available() -> bool:
     return shutil.which("pdftoppm") is not None
 
 
-def pick_available_model(preferred="gemini-1.5-flash-latest"):
+def pick_available_model(preferred="gemini-2.5-flash-latest"):
     """404時フォールバック用: generateContent対応モデルを自動選択"""
     try:
         models = genai.list_models()
@@ -71,10 +71,10 @@ def pick_available_model(preferred="gemini-1.5-flash-latest"):
                 usable.append(m.name)
         # flash 系を優先
         for n in usable:
-            if "flash" in n and "1.5" in n:
+            if "flash" in n and "2.5" in n:
                 return n
         for n in usable:
-            if "pro" in n and "1.5" in n:
+            if "pro" in n and "2.5" in n:
                 return n
         if usable:
             return usable[0]
@@ -90,7 +90,7 @@ def init_gemini():
         return None, False, "GEMINI_API_KEY が未設定です"
     try:
         genai.configure(api_key=api_key)
-        model_name = pick_available_model("gemini-1.5-flash-latest")
+        model_name = pick_available_model("gemini-2.5-flash-latest")
         model = genai.GenerativeModel(model_name)
         return model, True, model_name
     except Exception as e:
