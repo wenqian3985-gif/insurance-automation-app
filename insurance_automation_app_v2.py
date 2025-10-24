@@ -59,7 +59,10 @@ except Exception as e:
 # ======================
 # ログインフォーム
 # ======================
-name, authentication_status, username = authenticator.login("ログイン", "main")
+name, authentication_status, username = authenticator.login(
+    form_name="ログイン",
+    location="main"
+)
 
 
 # ======================
@@ -72,7 +75,6 @@ if authentication_status is False:
 elif authentication_status is None:
     st.warning("ユーザー名とパスワードを入力してください。")
     st.stop()
-
 
 # ======================
 # ログイン成功後の画面
