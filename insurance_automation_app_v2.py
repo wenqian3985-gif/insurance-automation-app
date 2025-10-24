@@ -35,7 +35,7 @@ st.markdown('<div class="main-header">🏥 保険業務自動化アシスタン�
 # 認証設定の読み込み
 # ======================
 try:
-    with open("config.yaml") as file:
+    with open("config.yaml", "r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
 except Exception as e:
     st.error(f"認証設定の読み込みに失敗しました: {e}")
@@ -43,10 +43,10 @@ except Exception as e:
 
 # Streamlit Authenticator 初期化（pre_authorized 削除対応版）
 authenticator = stauth.Authenticate(
-    config['credentials'],
-    config['cookie']['name'],
-    config['cookie']['key'],
-    config['cookie']['expiry_days']
+    credentials=config["credentials"],
+    cookie_name=config["cookie"]["name"],
+    key=config["cookie"]["key"],
+    cookie_expiry_days=config["cookie"]["expiry_days"],
 )
 
 # ======================
