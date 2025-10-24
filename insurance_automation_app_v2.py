@@ -72,11 +72,11 @@ except Exception as e:
 # authenticatorが初期化されているか確認
 if authenticator:
 # ログイン処理。戻り値のアンパックは3つ
-    # 【修正点】Locationに関するValueError回避のため、form_nameのみを位置引数として渡し、
-    # locationはデフォルト値 ('main') を使用するように変更します。
+    # 【修正点】ValueError回避のため、locationを明示的なキーワード引数として渡し直す。
+    # このライブラリはキーワード引数で渡されることが前提。
     name, authentication_status, username = authenticator.login(
-        "ログイン" # 位置引数1: form_nameのみ
-        # location引数を削除して、ライブラリのデフォルトに任せる
+        form_name="ログイン",
+        location="main"
     )
 
     # 認証ステータスに応じた処理
@@ -139,7 +139,7 @@ if authenticator:
 
                 # プロンプトをより明確にJSON形式を要求するように修正
                 prompt = (
-                    f"以下の保険見積書（またはその画像）から、指定されたすべての項目を抽出し、"
+                    f"以下の保険見積書（またはその画像）から、指定されたすべての項目を抽出出し、"
                     f"**必ず**JSON形式で返してください。不明な項目は空文字にしてください。\n"
                     f"抽出項目リスト: {', '.join(fields)}\n"
                     f"JSON形式の例: {json.dumps(example_json, ensure_ascii=False)}"
