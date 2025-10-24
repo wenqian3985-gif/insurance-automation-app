@@ -32,6 +32,10 @@ html, body, [class*="css"] {
 st.markdown('<div class="main-header">🏥 保険業務自動化アシスタント</div>', unsafe_allow_html=True)
 
 
+import streamlit as st
+import yaml
+import streamlit_authenticator as stauth
+
 # ======================
 # 認証設定ファイルの読み込み
 # ======================
@@ -41,6 +45,7 @@ try:
 except Exception as e:
     st.error(f"認証設定の読み込みに失敗しました: {e}")
     st.stop()
+
 # ======================
 # 認証初期化
 # ======================
@@ -60,26 +65,35 @@ except Exception as e:
 # ======================
 login_info = authenticator.login(location="main")
 
-# Noneチェック（未入力時のエラー防止）
+# 未入力チェック
 if login_info is None:
     st.stop()
 
+# unpack
 name, authentication_status, username = login_info
 
 # ======================
-# 認証結果処理
+# 認証結果の処理
 # ======================
 if authentication_status is False:
     st.error("ユーザー名またはパスワードが間違っています。")
-    st.stop()
 
 elif authentication_status is None:
     st.warning("ユーザー名とパスワードを入力してください。")
-    st.stop()
 
-# ✅ ログイン成功後にアプリ本体を実行
-st.success(f"ようこそ、{name}さん！")
-st.markdown("---")
+elif authentication_status is True:
+    st.success(f"ようこそ、{name}さん！")
+    authenticator.logout("ログアウト", "sidebar")
+
+    st.markdown("---")
+    st.subheader("📄 保険自動化システム 管理画面")
+    st.write("ここにPDF抽出やExcel出力など、アプリ本体の処理を追加できます。")
+
+    # 例: 簡単なアップロードテスト
+    uploaded_file = st.file_uploader("PDFファイルをアップロードしてください", type=["pdf"])
+    if uploaded_file:
+        st.write(f"アップロードされたファイル: {uploaded_file.name}")
+
 
 # ======================
 # GEMINI 初期化
