@@ -27,6 +27,16 @@ st.set_page_config(
     page_title="保険業務自動化アシスタント",
     layout="wide",
 )
+import streamlit_authenticator as stauth
+
+authenticator = stauth.Authenticate(
+    credentials=st.secrets["credentials"],
+    cookie_name=st.secrets["cookie"]["name"],
+    key=st.secrets["cookie"]["key"],
+    cookie_expiry_days=st.secrets["cookie"]["expiry_days"]
+)
+
+name, authentication_status, username = authenticator.login("ログイン", "main")
 
 st.markdown("""
 <style>
