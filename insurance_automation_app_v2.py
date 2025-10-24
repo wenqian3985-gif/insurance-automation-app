@@ -52,23 +52,25 @@ authenticator = stauth.Authenticate(
 # ======================
 # ログイン処理
 # ======================
-
 try:
-    name, authentication_status, username = authenticator.login("main")
+    authentication_result = authenticator.login(location="main")
 
+    if authentication_result is None:
+        st.error("ログイン画面の初期化に失敗しました。設定を確認してください。")
+        st.stop()
 
+    name, authentication_status, username = authentication_result
+
+    if authentication_status is False:
+        st.error("ユーザー名またはパスワードが間違っています。")
+    elif authentication_status is None:
+        st.warning("ユーザー名とパスワードを入力してください。")
+    else:
+        st.success(f"ようこそ、{name} さん！")
+        authenticator.logout("ログアウト", "sidebar")
 except Exception as e:
     st.error(f"ログイン画面の初期化に失敗しました: {e}")
     st.stop()
-
-if authentication_status is False:
-    st.error("ユーザー名またはパスワードが間違っています。")
-    st.stop()
-elif authentication_status is None:
-    st.warning("ユーザー名とパスワードを入力してください。")
-    st.stop()
-else:
-    st.success(f"ようこそ、{name} さん！")
 
 # ======================
 # GEMINI 初期化
