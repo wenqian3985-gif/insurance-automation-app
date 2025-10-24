@@ -72,11 +72,11 @@ except Exception as e:
 # authenticatorが初期化されているか確認
 if authenticator:
 # ログイン処理。戻り値のアンパックは3つ
-    # 【修正点】TypeError回避のため、form_nameとlocationを両方とも位置引数として渡す、
-    # 互換性の高い呼び出し方に変更します。
+    # 【修正点】Locationに関するValueError回避のため、form_nameのみを位置引数として渡し、
+    # locationはデフォルト値 ('main') を使用するように変更します。
     name, authentication_status, username = authenticator.login(
-        "ログイン", # 位置引数1: form_name
-        "main"    # 位置引数2: location
+        "ログイン" # 位置引数1: form_nameのみ
+        # location引数を削除して、ライブラリのデフォルトに任せる
     )
 
     # 認証ステータスに応じた処理
