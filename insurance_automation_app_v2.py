@@ -1,11 +1,10 @@
+import os
 import streamlit as st
 import pandas as pd
 import PyPDF2
 import io
-import os
 import json
 import base64
-import shutil
 import google.generativeai as genai
 from pdf2image import convert_from_bytes
 from PIL import Image
@@ -50,7 +49,7 @@ try:
         credentials=config["credentials"],
         cookie_name=config["cookie"]["name"],
         key=config["cookie"]["key"],
-        cookie_expiry_days=config["cookie"]["expiry_days"]
+        cookie_expiry_days=config["cookie"]["expiry_days"],
     )
 except Exception as e:
     st.error(f"ログイン画面の初期化に失敗しました。設定を確認してください。\n{e}")
@@ -59,27 +58,23 @@ except Exception as e:
 # ======================
 # ログインフォーム表示
 # ======================
-login_info = authenticator.login(location="main")
-
-if login_info is None:
-    st.stop()
-
-name, authentication_status, username = login_info
+authenticator.login(location="main")
 
 # ======================
-# ログイン結果処理
+# ログイン判定
 # ======================
-if authentication_status is False:
+if authenticator.authentication_status is False:
     st.error("ユーザー名またはパスワードが間違っています。")
     st.stop()
-elif authentication_status is None:
+elif authenticator.authentication_status is None:
     st.warning("ユーザー名とパスワードを入力してください。")
     st.stop()
 
 # ======================
 # ログイン成功後
 # ======================
-if authentication_status is True:
+if authenticator.authentication_status:
+    name = authenticator.username
     st.success(f"ようこそ、{name}さん！")
     authenticator.logout("ログアウト", "sidebar")
 
@@ -147,7 +142,6 @@ if authentication_status is True:
     st.subheader("📄 保険自動化システム 管理画面")
 
     st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード</div>', unsafe_allow_html=True)
-
     customer_file = st.file_uploader("顧客情報.xlsx をアップロード", type=["xlsx"])
     if customer_file:
         df_customer = pd.read_excel(customer_file)
@@ -157,9 +151,6 @@ if authentication_status is True:
     else:
         st.session_state["fields"] = ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
 
-    # ======================
-    # PDF処理セクション
-    # ======================
     st.markdown('<div class="section-header">📄 2. 見積書PDFから情報抽出</div>', unsafe_allow_html=True)
     uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True)
 
@@ -185,9 +176,6 @@ if authentication_status is True:
         else:
             st.warning("PDFから情報を抽出できませんでした。")
 
-    # ======================
-    # 結果ダウンロード
-    # ======================
     st.markdown('<div class="section-header">📊 3. 抽出結果をダウンロード</div>', unsafe_allow_html=True)
     if "comparison_df" in st.session_state and not st.session_state["comparison_df"].empty:
         output = io.BytesIO()
