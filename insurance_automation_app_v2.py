@@ -71,12 +71,13 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
-
 # ログイン処理。戻り値のアンパックは3つ
-    # 【修正点】streamlit_authenticatorのTypeError回避のため、fields引数ではなく、
-    # form_nameを第一引数として渡す、より互換性の高い呼び出し方に変更します。
-    name, authentication_status, username = authenticator.login(form_name="ログイン", location="main")
-    
+    # 【修正点】TypeError回避のため、form_nameとlocationを両方とも位置引数として渡す、
+    # 互換性の高い呼び出し方に変更します。
+    name, authentication_status, username = authenticator.login(
+        "ログイン", # 位置引数1: form_name
+        "main"    # 位置引数2: location
+    )
 
     # 認証ステータスに応じた処理
     if authentication_status is False:
@@ -177,11 +178,11 @@ if authenticator:
                     
                     return json.loads(clean_text)
                 except json.JSONDecodeError:
-                    st.error(f"[{pdf_name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...")
+                    st.error(f"[{pdf.name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...")
                     return None
                 except Exception as e:
                     # エラーメッセージに元のファイル名を含める
-                    st.error(f"[{pdf_name}] Gemini API呼び出しエラー: {e}")
+                    st.error(f"[{pdf.name}] Gemini API呼び出しエラー: {e}")
                     return None
 
         # ======================
