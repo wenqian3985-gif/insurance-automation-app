@@ -1,0 +1,15 @@
+credentials:
+  usernames:
+    admin:
+      name: "管理者"
+      password: "$2b$12$Pq4o0bWZyb..."  # あなたが生成したbcryptのハッシュ値
+
+cookie:
+  name: "insurance_auth"
+  key: "random_cookie_key_123"
+  expiry_days: 1
+
+preauthorized:
+  emails:
+    - "wenqian3985@gmail.com"
+
