@@ -71,9 +71,12 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
+
 # ログイン処理。戻り値のアンパックは3つ
+    # 【修正点】streamlit_authenticatorのTypeError回避のため、fields引数ではなく、
+    # form_nameを第一引数として渡す、より互換性の高い呼び出し方に変更します。
     name, authentication_status, username = authenticator.login(
-        fields={"Form name":"ログイン"}, 
+        "ログイン", # form_nameを第一引数として指定
         location="main"
     )
 
