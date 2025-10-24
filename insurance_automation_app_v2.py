@@ -71,7 +71,7 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
-    # ログイン処理。戻り値のアンパックは3つ
+# ログイン処理。戻り値のアンパックは3つ
     name, authentication_status, username = authenticator.login(
         fields={"Form name":"ログイン"}, 
         location="main"
