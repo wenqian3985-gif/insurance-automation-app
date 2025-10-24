@@ -1,0 +1,12 @@
+credentials:
+  usernames:
+    admin:
+      name: 管理者
+      password: "$2b$12$Pq4o0bWZyb..."  # ハッシュ化済みパスワード
+cookie:
+  name: insurance_auth
+  key: random_cookie_key_123
+  expiry_days: 1
+preauthorized:
+  emails:
+    - "wenqian3985@gmail.com"
