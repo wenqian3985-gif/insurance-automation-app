@@ -60,37 +60,29 @@ def poppler_available() -> bool:
     return shutil.which("pdftoppm") is not None
 
 
-def pick_available_model(preferred="gemini-2.5-flash-latest"):
-    """404時フォールバック用: generateContent対応モデルを自動選択"""
-    try:
-        models = genai.list_models()
-        usable = []
-        for m in models:
-            methods = getattr(m, "supported_generation_methods", [])
-            if "generateContent" in methods:
-                usable.append(m.name)
-        # flash 系を優先
-        for n in usable:
-            if "flash" in n and "2.5" in n:
-                return n
-        for n in usable:
-            if "pro" in n and "2.5" in n:
-                return n
-        if usable:
-            return usable[0]
-    except Exception:
-        pass
-    return preferred
-
-
 def init_gemini():
-    """Geminiモデル初期化（404対応含む）"""
+    """
+    Geminiモデル初期化。
+    ・モデルは“必ず”軽量の flash 系に固定（デフォルト：gemini-2.5-flash）
+    ・Secrets/環境変数 GEMINI_MODEL があれば上書き可能（ただし pro/exp には落とさない想定）
+    """
     api_key = get_api_key()
     if not api_key:
         return None, False, "GEMINI_API_KEY が未設定です"
+
+    # デフォルトは軽量モデルに固定
+    default_model = "gemini-2.5-flash"
     try:
+        user_model = None
+        try:
+            user_model = st.secrets.get("GEMINI_MODEL", None)  # optional
+        except Exception:
+            user_model = None
+        user_model = user_model or os.getenv("GEMINI_MODEL")
+
+        model_name = (user_model or default_model)
+
         genai.configure(api_key=api_key)
-        model_name = pick_available_model("gemini-2.5-flash-latest")
         model = genai.GenerativeModel(model_name)
         return model, True, model_name
     except Exception as e:
@@ -127,15 +119,56 @@ def read_pdf_text(pdf_bytes: bytes) -> str:
         return ""
 
 
-def pdf_to_images(pdf_bytes: bytes) -> List[Image.Image]:
-    """PDF→画像変換"""
-    return convert_from_bytes(pdf_bytes)
+def pdf_to_images(pdf_bytes: bytes, max_pages: int = 2) -> List[Image.Image]:
+    """PDF→画像変換（トークン節約のため先頭max_pages枚まで）"""
+    images = convert_from_bytes(pdf_bytes)
+    if max_pages and len(images) > max_pages:
+        images = images[:max_pages]
+    return images
 
 
 def safe_append(df: pd.DataFrame, record: Dict) -> pd.DataFrame:
     """DataFrameへ1行安全追加"""
     new_row = {col: record.get(col, "") for col in df.columns}
     return pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+
+
+def extract_json_string_from_response(response) -> str:
+    """
+    ★ 修正版の抽出処理部分（2.5向け）
+    - response.text が空でも candidates[].content.parts から取り出す
+    - ```json ... ``` のコードブロックを除去
+    - 文字列を返す（空なら ""）
+    """
+    raw = ""
+
+    # 1) まず response.text を優先
+    if hasattr(response, "text") and isinstance(response.text, str) and response.text.strip():
+        raw = response.text.strip()
+
+    # 2) 空なら candidates → parts を探索
+    if not raw and hasattr(response, "candidates") and response.candidates:
+        parts = getattr(response.candidates[0].content, "parts", None)
+        if parts:
+            # 最初のテキストパートを優先
+            for p in parts:
+                text = getattr(p, "text", None)
+                if isinstance(text, str) and text.strip():
+                    raw = text.strip()
+                    break
+
+    # 3) コードブロック除去（```json ... ``` or ``` ... ```）
+    if raw.startswith("```"):
+        # 先頭の```json or ``` を取り除く
+        lines = raw.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        # 末尾の ``` を取り除く
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw = "\n".join(lines).strip()
+
+    return raw
 
 
 # ========== 初期化 ==========
@@ -181,6 +214,7 @@ if customer_file:
     else:
         st.error("列名を取得できませんでした。")
 
+
 # ========== セクション2: PDFアップロード & 抽出 ==========
 st.markdown('<div class="section-header">📄 2. 見積書PDFから情報抽出</div>', unsafe_allow_html=True)
 uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True)
@@ -201,18 +235,21 @@ if uploaded_pdfs and st.button("PDFから情報を抽出"):
 
                 # 抽出項目設定
                 fields = st.session_state["extraction_fields"]
+                # 空文字例（不明は空文字で返させる）
                 example_json = {f: "" for f in fields}
                 prompt = (
-                    f"以下の保険見積書から {', '.join(fields)} を抽出し、日本語JSONで返してください。"
-                    f"不明な項目は空文字で。例: {json.dumps(example_json, ensure_ascii=False)}"
+                    f"以下の保険見積書から {', '.join(fields)} を抽出し、日本語の有効なJSON（オブジェクト）で返してください。"
+                    f"不明な項目は空文字にしてください。例: {json.dumps(example_json, ensure_ascii=False)}"
                 )
 
+                # --- API呼び出し直前のモデル指定は init_gemini() で flash 固定済み ---
+                # 画像送信はトークン節約のため先頭2ページまで
                 if text:
                     response = model.generate_content(prompt + "\n\n" + text)
                 else:
                     if not poppler_available():
                         raise RuntimeError("poppler-utils が必要です。packages.txt に追加してください。")
-                    images = pdf_to_images(pdf_bytes)
+                    images = pdf_to_images(pdf_bytes, max_pages=2)
                     parts = [prompt]
                     for img in images:
                         buf = io.BytesIO()
@@ -220,14 +257,31 @@ if uploaded_pdfs and st.button("PDFから情報を抽出"):
                         parts.append({"mime_type": "image/png", "data": buf.getvalue()})
                     response = model.generate_content(parts)
 
-                data = json.loads(response.text)
-                data["ファイル名"] = pdf.name
-                results.append(data)
-                st.success(f"✅ {pdf.name} 抽出成功")
-                st.session_state["comparison_df"] = safe_append(st.session_state["comparison_df"], data)
+                # ★ 修正版の抽出処理部分（安全な取り出し・コードブロック除去）
+                raw_str = extract_json_string_from_response(response)
+                if not raw_str:
+                    raise ValueError("Geminiから空の応答を受け取りました。PDF内容やサイズをご確認ください。")
+
+                try:
+                    data = json.loads(raw_str)
+                except json.JSONDecodeError as je:
+                    st.sidebar.error(f"[{pdf.name}] JSONデコードエラー: {je}")
+                    st.sidebar.code(raw_str, language="json")
+                    raise ValueError("JSONのパースに失敗しました。応答形式をご確認ください。")
+
+                # ファイル名付与＆格納
+                if isinstance(data, dict):
+                    data["ファイル名"] = pdf.name
+                    results.append(data)
+                    st.success(f"✅ {pdf.name} 抽出成功")
+                    st.session_state["comparison_df"] = safe_append(st.session_state["comparison_df"], data)
+                else:
+                    raise ValueError("Geminiの応答がJSONオブジェクトではありません。")
+
             except Exception as e:
                 st.error(f"❌ {pdf.name} 抽出エラー: {e}")
             progress.progress(i / total)
+
 
 # ========== セクション3: 結果表示・ダウンロード ==========
 st.markdown('<div class="section-header">📊 3. 見積情報比較表</div>', unsafe_allow_html=True)
