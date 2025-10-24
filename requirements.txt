@@ -21,3 +21,6 @@ google-api-core==2.19.1
 streamlit-authenticator
 bcrypt
 pyyaml
+
+streamlit-authenticator==0.4.2
+extra-streamlit-components==0.1.81
