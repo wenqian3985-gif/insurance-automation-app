@@ -52,10 +52,15 @@ authenticator = stauth.Authenticate(
 # ======================
 # ログイン処理
 # ======================
-name, authentication_status, username = authenticator.login(
-    form_name="ログイン",    # ← form_name を明示的に指定
+
+try:
+    name, authentication_status, username = authenticator.login(
+     form_name="ログイン",    # ← form_name を明示的に指定
     location="main"          # ← 'main' or 'sidebar' or 'unrendered'
-)
+    )
+except Exception as e:
+    st.error(f"ログイン画面の初期化に失敗しました: {e}")
+    st.stop()
 
 if authentication_status is False:
     st.error("ユーザー名またはパスワードが間違っています。")
