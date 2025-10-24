@@ -1,14 +1,10 @@
 credentials:
   usernames:
     admin:
-      name: "管理者"
-      password: "$2b$12$g869MgWj8AsP7UTmHatwtuE67Lbt6.RQ.cCt3PMCvkG1SaCTUDzem"  # あなたが生成したbcryptのハッシュ値
+      name: 管理者
+      password: "$2b$12$zv8tQv.b/LxZ8I45z6E7PuqJ7PL5E0V8r4lv22c4ZFYh5sYyHo32O"  # ここにgenerate_hash.pyで作成したハッシュを入れる
 
 cookie:
-  name: "insurance_auth"
-  key: "random_cookie_key_123"
+  name: insurance_auth
+  key: random_cookie_key_123
   expiry_days: 1
-
-preauthorized:
-  emails:
-    - "wenqian3985@gmail.com"
