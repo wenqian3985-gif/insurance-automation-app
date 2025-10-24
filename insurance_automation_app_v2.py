@@ -31,8 +31,9 @@ html, body, [class*="css"] {
 
 st.markdown('<div class="main-header">🏥 保険業務自動化アシスタント</div>', unsafe_allow_html=True)
 
+
 # ======================
-# 認証設定の読み込み
+# 認証設定ファイルの読み込み
 # ======================
 try:
     with open("config.yaml", "r", encoding="utf-8") as file:
@@ -40,37 +41,45 @@ try:
 except Exception as e:
     st.error(f"認証設定の読み込みに失敗しました: {e}")
     st.stop()
-
-# Streamlit Authenticator 初期化（pre_authorized 削除対応版）
-authenticator = stauth.Authenticate(
-    credentials=config["credentials"],
-    cookie_name=config["cookie"]["name"],
-    key=config["cookie"]["key"],
-    cookie_expiry_days=config["cookie"]["expiry_days"],
-)
-
 # ======================
-# ログイン処理
+# 認証初期化
 # ======================
 try:
-    authentication_result = authenticator.login(location="main")
-
-    if authentication_result is None:
-        st.error("ログイン画面の初期化に失敗しました。設定を確認してください。")
-        st.stop()
-
-    name, authentication_status, username = authentication_result
-
-    if authentication_status is False:
-        st.error("ユーザー名またはパスワードが間違っています。")
-    elif authentication_status is None:
-        st.warning("ユーザー名とパスワードを入力してください。")
-    else:
-        st.success(f"ようこそ、{name} さん！")
-        authenticator.logout("ログアウト", "sidebar")
+    authenticator = stauth.Authenticate(
+        credentials=config["credentials"],
+        cookie_name=config["cookie"]["name"],
+        key=config["cookie"]["key"],
+        cookie_expiry_days=config["cookie"]["expiry_days"]
+    )
 except Exception as e:
-    st.error(f"ログイン画面の初期化に失敗しました: {e}")
+    st.error(f"ログイン画面の初期化に失敗しました。設定を確認してください。\n{e}")
     st.stop()
+
+# ======================
+# ログインフォーム表示
+# ======================
+login_info = authenticator.login(location="main")
+
+# Noneチェック（未入力時のエラー防止）
+if login_info is None:
+    st.stop()
+
+name, authentication_status, username = login_info
+
+# ======================
+# 認証結果処理
+# ======================
+if authentication_status is False:
+    st.error("ユーザー名またはパスワードが間違っています。")
+    st.stop()
+
+elif authentication_status is None:
+    st.warning("ユーザー名とパスワードを入力してください。")
+    st.stop()
+
+# ✅ ログイン成功後にアプリ本体を実行
+st.success(f"ようこそ、{name}さん！")
+st.markdown("---")
 
 # ======================
 # GEMINI 初期化
