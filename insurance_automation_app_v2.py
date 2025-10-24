@@ -59,11 +59,14 @@ except Exception as e:
 # ======================
 # ログインフォーム
 # ======================
-name, authentication_status, username = authenticator.login(
-    form_name="ログイン",
-    location="main"
-)
+login_info = authenticator.login(form_name="ログイン", location="main")
 
+if login_info is None:
+    st.stop()
+   name, authentication_status, username = login_info
+except Exception as e:
+    st.error(f"ログイン画面の初期化に失敗しました: {e}")
+    st.stop()
 
 # ======================
 # 認証状態の分岐
