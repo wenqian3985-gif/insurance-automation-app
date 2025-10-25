@@ -90,31 +90,42 @@ if "authentication_status" not in st.session_state:
 if "auth_render_error" not in st.session_state:
     st.session_state["auth_render_error"] = False
 
-# 強制リセット関数
-def force_session_reset():
-    """セッション状態をクリアし、強制的に再実行する"""
-    st.session_state["authentication_status"] = None
-    st.session_state["name"] = None
-    st.session_state["username"] = None
-    st.session_state["auth_render_error"] = False
-    st.success("セッション状態をリセットしました。アプリケーションが再起動します。")
-    time.sleep(1) # メッセージ表示のための短い待機
-    # 修正: st.experimental_rerun() を st.rerun() に変更
-    st.rerun()
-
-
-# authenticatorが初期化されているか確認
+# 
+# # authenticatorが初期化されているか確認
 if authenticator:
     
-    # 【修正: 致命的なレンダリングエラー発生時の処理】
+    # 【修正】強制リセット関数を authenticator が存在するスコープ内に定義
+    def force_session_reset():
+        """セッション状態と認証クッキーをクリアし、強制的に再実行する"""
+        try:
+            # 1. 認証クッキーを削除 (最重要)
+            authenticator.cookie_manager.delete(authenticator.cookie_name)
+            
+            # 2. セッション状態をクリア
+            st.session_state["authentication_status"] = None
+            st.session_state["name"] = None
+            st.session_state["username"] = None
+            st.session_state["auth_render_error"] = False
+            
+            st.success("セッションとクッキーをリセットしました。アプリケーションが再起動します。")
+            time.sleep(1) # メッセージ表示のための短い待機
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"リセット中にエラーが発生しました: {e}。手動でブラウザのCookieを削除してください。")
+            st.stop()
+
+
+    # 致命的なレンダリングエラー発生時の処理
     if st.session_state["auth_render_error"]:
         st.error("❌ 認証フォームのレンダリング中に致命的なエラーが検出されました。")
-        st.warning("この問題は、Streamlitのセッション状態が不安定になっていることが原因である可能性があります。")
+        st.warning("この問題は、Streamlitのセッション状態またはブラウザの認証クッキーが不安定になっていることが原因である可能性があります。")
         st.info("通常の解決策（リロード、キャッシュクリア）で解決しない場合は、以下の**最終手段**をお試しください。")
         
         # 最終手段として、強制リセットボタンを表示
         st.markdown('<div class="reset-button">', unsafe_allow_html=True)
-        if st.button("🔴 セッション強制リセット (最終手段)", on_click=force_session_reset):
+        # 修正: ボタンのテキストを変更
+        if st.button("🔴 セッションとクッキーを強制リセット (最終手段)", on_click=force_session_reset):
              pass # on_clickで処理が実行される
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -165,7 +176,6 @@ if authenticator:
                 st.session_state["authentication_status"] = None
                 
                 # エラーフラグを立てた後、メイン処理 L135 の st.stop() に処理を移す
-                # 修正: st.experimental_rerun() を st.rerun() に変更
                 st.rerun()
                 
         # 3. 認証後のメッセージ表示ロジック
@@ -366,3 +376,4 @@ if authenticator:
 elif not authenticator:
     st.error("❌ 認証設定のロードに失敗しました。アプリケーションを起動できません。")
     st.stop()
+
