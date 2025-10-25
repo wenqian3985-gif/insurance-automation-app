@@ -124,7 +124,9 @@ if authenticator:
             except Exception as e:
                 # Locationエラーなどの例外をキャッチ
                 error_message = str(e)
-                st.error(f"認証処理中にエラーが発生しました: {error_message}")
+                
+                # エラーメッセージをサイドバーに表示し、メインパネルのエラー表示は削除
+                st.sidebar.error(f"認証処理中にエラーが発生しました。再試行してください。")
                 
                 # Locationエラーを検出した場合、認証をリセットして再試行を促す
                 if "Location must be one of" in error_message:
