@@ -73,41 +73,27 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
-    name, authentication_status, username = None, None, None
     
-    # 【修正】authenticator.login()の戻り値がNoneである可能性に対応
-    # TypeError: cannot unpack non-iterable NoneType object を回避する
+    # 【再修正】非応答性の問題を解決するため、認証ロジックを簡素化します。
+    # 以前の複雑なアンパック処理を削除し、Streamlit Authenticatorの標準的な
+    # try...except ValueError パターンを使用します。
+    # これにより、ログインボタンがクリックされたときに Streamlit の再実行が
+    # 適切にトリガーされることを期待します。
+    name, authentication_status, username = None, None, None
     try:
-        login_result = authenticator.login(
+        # 認証フォームを表示し、結果を変数に格納 (3つの戻り値を期待)
+        name, authentication_status, username = authenticator.login(
             fields={'Form name': 'ログイン'},
             location='main'
         )
-
-        if login_result is not None:
-            # 戻り値がNoneでなければ、安全にアンパックを試みる
-            # 多くの環境で3つの戻り値を返すため、3値で試行。数が合わなければ再度TypeErrorが発生するが、
-            # StreamlitAPIException回避のため、複数呼び出しは避ける
-            if len(login_result) == 3:
-                 name, authentication_status, username = login_result
-            elif len(login_result) == 4:
-                 # 4つの戻り値に対応する環境向け
-                 name, authentication_status, username, _ = login_result
-            else:
-                 st.error(f"認証オブジェクトが予期しない数の戻り値 ({len(login_result)}個) を返しました。")
-                 authentication_status = None
-        else:
-            # login_result が None の場合 (初期表示時など)
-            authentication_status = None
-
+    except ValueError:
+        # 戻り値の数が合わない（初期描画時、または4つの戻り値の可能性がある場合）
+        # この場合、authentication_statusはNoneのまま
+        pass
     except Exception as e:
-        # TypeError (戻り値の数が合わない) やその他の予期せぬエラーが発生した場合の安全策
-        st.error(f"認証フォームの表示中にエラーが発生しました。({type(e).__name__}: {e})")
-        # 認証失敗として扱い、メインロジックに進まないようにする
-        authentication_status = None
-        name = None
-        username = None
-
-
+        # その他の予期せぬエラー
+        st.error(f"認証フォームの表示中に予期せぬエラーが発生しました。({type(e).__name__}: {e})")
+        
     # 認証ステータスに応じた処理
     if authentication_status is False:
         st.error("ユーザー名またはパスワードが間違っています。")
