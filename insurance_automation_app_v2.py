@@ -73,11 +73,11 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
-    # 【抜本的修正点】locationのValueErrorを回避するため、
-    # fieldsとlocationの両方をキーワード引数で明示的に指定します。
-    name, authentication_status, username, _ = authenticator.login(
+    # 【修正点】TypeError回避のため、戻り値のアンパックを3つに戻し、keyを明示的に指定します。
+    name, authentication_status, username = authenticator.login(
         fields={'Form name': 'ログイン'}, # フォーム名をキーワードで指定 (fields引数)
-        location='main'                     # locationをキーワードで指定 (location引数)
+        location='main',                     # locationをキーワードで指定 (location引数)
+        key='login_form'                     # Streamlitウィジェットのキーを追加
     )
 
     # 認証ステータスに応じた処理
