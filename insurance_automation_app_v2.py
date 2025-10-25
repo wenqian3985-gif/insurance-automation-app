@@ -188,7 +188,7 @@ if st.session_state["authentication_status"]:
                 f"以下の保険見積書（またはその画像）から、指定されたすべての項目を抽出出し、"
                 f"**必ず**JSON形式で返してください。不明な項目は空文字にしてください。\n"
                 f"抽出項目リスト: {', '.join(fields)}\n"
-                f"JSON形式の例: {json.dumps(example_json, ensure_ascii=False, ensure_ascii=False)}"
+                f"JSON形式の例: {json.dumps(example_json, ensure_ascii=False)}"
             )
 
             contents = [{"text": prompt}]
@@ -219,10 +219,10 @@ if st.session_state["authentication_status"]:
                 return json.loads(clean_text)
             except json.JSONDecodeError:
                 # エラーメッセージを分かりやすく修正
-                st.error(f"[{pdf_name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...")
+                st.error(f"[{pdf.name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...")
                 return None
             except Exception as e:
-                st.error(f"[{pdf_name}] Gemini API呼び出しエラー: {e}")
+                st.error(f"[{pdf.name}] Gemini API呼び出しエラー: {e}")
                 return None
 
     # ======================
