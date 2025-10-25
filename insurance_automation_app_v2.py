@@ -73,11 +73,14 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
-    # 【修正点】TypeError回避のため、戻り値のアンパックを3つに戻し、keyを明示的に指定します。
-    name, authentication_status, username = authenticator.login(
+    # 【再修正点】TypeError回避のため、戻り値のアンパックを4つに戻し（最新バージョン準拠）、
+    # 'pre_login=False' を追加して、より安定したログインフォームの挙動を強制します。
+    # 戻り値: name, authentication_status, username, pre_login_form_key
+    name, authentication_status, username, _ = authenticator.login(
         fields={'Form name': 'ログイン'}, # フォーム名をキーワードで指定 (fields引数)
         location='main',                     # locationをキーワードで指定 (location引数)
-        key='login_form'                     # Streamlitウィジェットのキーを追加
+        key='login_form',                    # Streamlitウィジェットのキーを追加
+        pre_login=False                      # 互換性確保のため追加
     )
 
     # 認証ステータスに応じた処理
