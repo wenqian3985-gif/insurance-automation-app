@@ -65,8 +65,9 @@ try:
         config_auth["credentials"],
         config_auth["cookie"]["name"],
         config_auth["cookie"]["key"],
-        config_auth["cookie"]["expiry_days"],
-        force_update=True
+        config_auth["cookie"]["expiry_days"]
+        # 修正: force_update=True パラメータを削除 (レンダリング競合の回避)
+        # force_update=True
     )
     print("Authentication initialized successfully.")
 
@@ -94,12 +95,13 @@ if "auth_render_error" not in st.session_state:
 # # authenticatorが初期化されているか確認
 if authenticator:
     
-    # 【修正】強制リセット関数を authenticator が存在するスコープ内に定義
+    # 強制リセット関数を authenticator が存在するスコープ内に定義
     def force_session_reset():
         """セッション状態と認証クッキーをクリアし、強制的に再実行する"""
         try:
             # 1. 認証クッキーを削除 (最重要)
-            authenticator.cookie_manager.delete(authenticator.cookie_name)
+            if authenticator.cookie_manager:
+                authenticator.cookie_manager.delete(authenticator.cookie_name)
             
             # 2. セッション状態をクリア
             st.session_state["authentication_status"] = None
@@ -124,7 +126,6 @@ if authenticator:
         
         # 最終手段として、強制リセットボタンを表示
         st.markdown('<div class="reset-button">', unsafe_allow_html=True)
-        # 修正: ボタンのテキストを変更
         if st.button("🔴 セッションとクッキーを強制リセット (最終手段)", on_click=force_session_reset):
              pass # on_clickで処理が実行される
         st.markdown('</div>', unsafe_allow_html=True)
