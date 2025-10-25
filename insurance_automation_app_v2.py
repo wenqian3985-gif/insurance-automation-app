@@ -68,42 +68,77 @@ except Exception as e:
 # ログインフォームと認証
 # ======================
 
+# セッション状態に認証ステータスを初期化
+if "authentication_status" not in st.session_state:
+    # 初回実行時、またはCookieが有効期限切れの場合、認証ステータスはNone
+    st.session_state["authentication_status"] = None
+    st.session_state["name"] = None
+    st.session_state["username"] = None
+
 # authenticatorが初期化されているか確認
 if authenticator:
     
-    # 【最重要：認証ロジックの再構築】
-    # サイドバーに認証フォームを配置し、認証が完了するまでメインコンテンツを描画しません。
-    # 複数の例外（TypeError/ValueError）に対応することで堅牢性を確保します。
-    
-    name, authentication_status, username = None, None, None
-    
-    # 認証フォームをサイドバーに配置
-    with st.sidebar:
-        st.title("ログイン")
-        try:
-            # 認証フォームを表示し、結果を変数に格納 (3つの戻り値を期待)
-            name, authentication_status, username = authenticator.login(
-                fields={'Form name': '認証'},
-                location='sidebar' 
-            )
-        except (ValueError, TypeError):
-            # 戻り値の数が合わないか、Noneが返された場合を捕捉
-            pass
-        except Exception as e:
-            # その他の予期せぬエラー
-            st.error(f"認証フォームの表示中に予期せぬエラーが発生しました。({type(e).__name__}: {e})")
+    # 既存の認証状態（Cookieによるログイン）をチェック
+    name, authentication_status, username = authenticator.cookie_handler()
 
-    # メインコンテンツでのステータス表示
-    if authentication_status is False:
-        st.sidebar.error("ユーザー名またはパスワードが間違っています。")
-        st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。サイドバーからログインしてください。")
-    elif authentication_status is None:
-        st.sidebar.info("ユーザー名とパスワードを入力してください。")
-        st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。サイドバーからログインしてください。")
+    # 認証情報をセッション状態に設定
+    st.session_state["authentication_status"] = authentication_status
+    st.session_state["name"] = name
+    st.session_state["username"] = username
+
+    # Streamlitネイティブのformを使用して、ログインボタンのクリックイベントを強制的に有効にする
+    if authentication_status is None or authentication_status is False:
+        with st.sidebar:
+            st.title("ログイン (安定版)")
+            
+            # st.formを使用して、ボタンのクリックイベントをStreamlitに確実に捕捉させる
+            with st.form("native_login_form", clear_on_submit=False):
+                username_input = st.text_input("ユーザー名")
+                password_input = st.text_input("パスワード", type="password")
+                # フォームのボタンはStreamlitの最も信頼性の高いクリックトリガー
+                submitted = st.form_submit_button("ログイン")
+            
+            # フォームが送信された場合、手動で認証を試みる
+            if submitted:
+                # 認証処理
+                try:
+                    name, authentication_status, username = authenticator.authenticate(
+                        username_input, 
+                        password_input, 
+                    )
+                    
+                    # 認証結果をセッション状態に保存し、Streamlitの再実行を促す
+                    st.session_state["authentication_status"] = authentication_status
+                    st.session_state["name"] = name
+                    st.session_state["username"] = username
+
+                    # 認証結果に応じたメッセージ
+                    if authentication_status:
+                        st.success(f"ログイン成功: {name}さん")
+                        # 成功した場合、アプリ全体を再実行してメインコンテンツを表示させる
+                        st.experimental_rerun() 
+                    elif authentication_status is False:
+                        st.error("ユーザー名またはパスワードが間違っています。")
+                    else:
+                        # ここには到達しないはずだが、念のため
+                        st.info("認証情報を入力してください。")
+
+                except Exception as e:
+                    # 認証中に発生しうる予期せぬエラー
+                    st.error(f"認証処理中にエラーが発生しました: {e}")
+
+            # ログイン前のメッセージ
+            if st.session_state["authentication_status"] is None:
+                st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+                st.sidebar.info("ユーザー名とパスワードを入力してください。")
+            elif st.session_state["authentication_status"] is False:
+                st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+                st.sidebar.error("ユーザー名またはパスワードが間違っています。")
+
     
-    # ログイン成功後の画面 (メインコンテンツ)
-    if authentication_status:
-        st.sidebar.success(f"ようこそ、{name}さん！")
+    # メインコンテンツの表示
+    if st.session_state["authentication_status"]:
+        st.sidebar.success(f"ようこそ、{st.session_state['name']}さん！")
         authenticator.logout("ログアウト", "sidebar") # ログアウトボタンはサイドバーへ配置
 
         st.markdown("---")
