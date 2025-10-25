@@ -70,7 +70,6 @@ except Exception as e:
 
 # セッション状態に認証ステータスを初期化
 if "authentication_status" not in st.session_state:
-    # 初回実行時、認証状態をNoneに設定し、cookie_handlerを呼び出す
     st.session_state["authentication_status"] = None
     st.session_state["name"] = None
     st.session_state["username"] = None
@@ -81,13 +80,11 @@ if "login_attempted" not in st.session_state:
 # authenticatorが初期化されているか確認
 if authenticator:
     
-    # 初回実行時、または認証情報が存在しない場合にのみCookieをチェックする
+    # 1. Cookieによる認証状態をチェック (st.session_state["authentication_status"] が None の場合のみ)
     if st.session_state["authentication_status"] is None:
         try:
-            # Cookieによる認証状態をチェック
+            # Cookieによる認証状態をチェックし、セッションに反映
             name, authentication_status, username = authenticator.cookie_handler()
-            
-            # 認証情報をセッション状態に設定
             st.session_state["authentication_status"] = authentication_status
             st.session_state["name"] = name
             st.session_state["username"] = username
@@ -101,7 +98,7 @@ if authenticator:
             st.session_state["username"] = None
 
 
-    # 認証ステータスがNoneまたはFalseの場合、ログインフォームを表示
+    # 2. 認証ステータスがNoneまたはFalseの場合、ログインフォームを表示
     if st.session_state["authentication_status"] in (None, False):
         
         # ログインフォームを直接サイドバーにレンダリングする
@@ -110,46 +107,53 @@ if authenticator:
             
             # stauth.login()を呼び出す
             try:
-                # 認証処理。stauth.login()は認証に成功すると自動でst.experimental_rerun()を呼び出す
+                # 認証処理。location='sidebar' を明示
                 name, authentication_status, username = authenticator.login(
                     "ログイン", 
-                    "sidebar" # location='sidebar' を明示
+                    "sidebar" 
                 )
                 
                 # 認証結果をセッション状態に反映させる
                 st.session_state["authentication_status"] = authentication_status
                 st.session_state["name"] = name
                 st.session_state["username"] = username
+                
+                # ログイン試行が成功/失敗にかかわらず実行されたことをマーク
                 st.session_state["login_attempted"] = True
 
             except Exception as e:
-                # 認証中に発生しうる予期せぬエラー
-                # Locationエラーは、ここで捕捉されることが多い
-                st.error(f"認証処理中にエラーが発生しました: {e}")
-                # エラーが発生した場合、認証状態をNoneに戻すか、Falseにする
-                if "Location must be one of" in str(e):
+                # Locationエラーなどの例外をキャッチ
+                error_message = str(e)
+                st.error(f"認証処理中にエラーが発生しました: {error_message}")
+                
+                # Locationエラーを検出した場合、認証をリセットして再試行を促す
+                if "Location must be one of" in error_message:
+                     # 認証状態をリセットすることで、次の実行でフォームが再描画される
                      st.session_state["authentication_status"] = None
-                     st.session_state["login_attempted"] = False # 再試行を促す
+                     st.session_state["login_attempted"] = False
                 
-                # st.experimental_rerun() # Locationエラー後の強制再実行は危険なため避ける
+                # 念のため、認証失敗としてマーク
+                st.session_state["authentication_status"] = False
+                st.session_state["name"] = None
+                st.session_state["username"] = None
                 
-
-        # 認証後のメッセージ表示ロジックをメインパネルに表示
+        # 3. 認証後のメッセージ表示ロジック
+        
+        # ユーザーが認証に失敗した（False）かつ、ログインを試行した（login_attempted）場合
         if st.session_state["authentication_status"] is False:
-            # 認証失敗時のエラーメッセージ
-            # stauth.login()が自動でエラーメッセージ（'ユーザー名/パスワードが間違っています'）を出すはずだが、念のため
             if st.session_state["login_attempted"]:
                 st.sidebar.error("ユーザー名またはパスワードが間違っています。")
+            
             st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
             st.session_state["login_attempted"] = False # リセット
             
+        # ログアウト直後、または初回訪問時（None）
         elif st.session_state["authentication_status"] is None:
-            # 初回訪問時、またはログアウト後の情報メッセージ
             st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
             st.sidebar.info("ユーザー名とパスワードを入力してください。")
 
     
-    # メインコンテンツの表示
+    # 4. メインコンテンツの表示 (認証成功時)
     if st.session_state["authentication_status"]:
         st.sidebar.success(f"ようこそ、{st.session_state['name']}さん！")
         authenticator.logout("ログアウト", "sidebar") # ログアウトボタンはサイドバーへ配置
