@@ -78,16 +78,29 @@ AUTHENTICATION_USERS = load_secrets_users()
 
 def authenticate_user(username, password):
     """ユーザー名とパスワードを検証する"""
+    input_hash = hash_password(password) # 入力パスワードをハッシュ化
+    
+    # デバッグログを追加
+    print(f"--- 認証試行 ---")
+    print(f"入力ユーザー名: {username}")
+    print(f"入力パスワードハッシュ: {input_hash}")
+    
     # HARDCODED_USERS を AUTHENTICATION_USERS に置き換え
     if username in AUTHENTICATION_USERS:
-        # 入力パスワードをハッシュ化
-        input_hash = hash_password(password)
+        stored_hash = AUTHENTICATION_USERS[username]["password_hash"]
+        print(f"Secretsに格納されたユーザー名 ({username}) のハッシュ: {stored_hash}")
+        
         # 保存されているハッシュと比較
-        if input_hash == AUTHENTICATION_USERS[username]["password_hash"]:
+        if input_hash == stored_hash:
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
             st.session_state["username"] = username
+            print(f"認証成功: {username} ({st.session_state['name']})")
             return True
+        else:
+            print(f"認証失敗: ハッシュ値不一致。")
+    else:
+        print(f"認証失敗: ユーザー名 ({username}) がSecretsに見つかりません。")
     
     st.session_state["authentication_status"] = False
     st.session_state["name"] = None
@@ -303,7 +316,7 @@ if st.session_state["authentication_status"]:
         @st.cache_data
         def to_excel_bytes(df):
             output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            with pd.ExcelWriter(output, engine="openypxl") as writer:
                 df.to_excel(writer, index=False, sheet_name="見積情報比較表")
             return output.getvalue()
 
