@@ -70,7 +70,7 @@ except Exception as e:
 
 # セッション状態に認証ステータスを初期化
 if "authentication_status" not in st.session_state:
-    # 初回実行時、またはCookieが有効期限切れの場合、認証ステータスはNone
+    # 初回実行時、認証状態をNoneに設定し、cookie_handlerを呼び出す
     st.session_state["authentication_status"] = None
     st.session_state["name"] = None
     st.session_state["username"] = None
@@ -78,22 +78,27 @@ if "authentication_status" not in st.session_state:
 # authenticatorが初期化されているか確認
 if authenticator:
     
-    # 既存の認証状態（Cookieによるログイン）をチェック - クラッシュ対策としてtry-exceptを追加
-    name, authentication_status, username = None, None, None
-    try:
-        name, authentication_status, username = authenticator.cookie_handler()
-    except Exception as e:
-        # cookie_handlerが失敗した場合、認証状態をリセット
-        st.sidebar.error("セッションの読み込みに失敗しました。再度ログインしてください。")
-        print(f"Cookie Handler Error: {e}")
-        authentication_status = False # ログインフォームを強制的に表示
-        name = None
-        username = None
-    
-    # 認証情報をセッション状態に設定
-    st.session_state["authentication_status"] = authentication_status
-    st.session_state["name"] = name
-    st.session_state["username"] = username
+    # 初回実行時、または認証情報が存在しない場合にのみCookieをチェックする
+    # これにより、st.experimental_rerun()後の予期せぬエラーを防ぐ
+    if st.session_state["authentication_status"] is None:
+        try:
+            # Cookieによる認証状態をチェック
+            name, authentication_status, username = authenticator.cookie_handler()
+            
+            # 認証情報をセッション状態に設定
+            st.session_state["authentication_status"] = authentication_status
+            st.session_state["name"] = name
+            st.session_state["username"] = username
+
+        except Exception as e:
+            # cookie_handlerが失敗した場合（例：無効なCookie、Streamlitの再実行時の競合）
+            st.sidebar.error("セッションの読み込みに失敗しました。再度ログインしてください。")
+            print(f"Cookie Handler Error: {e}")
+            # 認証状態をFalseに設定し、ログインフォームを表示させる
+            st.session_state["authentication_status"] = False
+            st.session_state["name"] = None
+            st.session_state["username"] = None
+
 
     # Streamlitネイティブのformを使用して、ログインボタンのクリックイベントを強制的に有効にする
     if st.session_state["authentication_status"] is None or st.session_state["authentication_status"] is False:
@@ -141,8 +146,15 @@ if authenticator:
                 st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
                 st.sidebar.info("ユーザー名とパスワードを入力してください。")
             elif st.session_state["authentication_status"] is False:
+                # cookie_handlerエラーまたは認証失敗時にこのメッセージが表示される
                 st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-                st.sidebar.error("ユーザー名またはパスワードが間違っています。")
+                # cookie_handlerのエラーメッセージがある場合はそれを優先、ない場合は通常の失敗メッセージ
+                if st.session_state.get("cookie_error", False):
+                    st.sidebar.error("ログイン情報が無効です。再度入力してください。")
+                    # エラーフラグをクリア
+                    st.session_state["cookie_error"] = False
+                else:
+                    st.sidebar.error("ユーザー名またはパスワードが間違っています。")
 
     
     # メインコンテンツの表示
