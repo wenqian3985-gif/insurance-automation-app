@@ -45,8 +45,9 @@ try:
             "usernames": st.secrets["auth"]["credentials"]["usernames"]
         },
         "cookie": {
+            # 修正: 'cookie'キーは存在しないため、直接 'cookie_name' と 'cookie_key' を参照する
             "name": st.secrets["auth"]["cookie_name"],
-            "key": st.secrets["auth"]["cookie"]["key"], # ここは正しいキーを参照
+            "key": st.secrets["auth"]["cookie_key"], # 修正箇所
             "expiry_days": st.secrets["auth"]["expiry_days"],
         },
         "preauthorized": {"emails": []}
