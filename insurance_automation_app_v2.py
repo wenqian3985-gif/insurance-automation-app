@@ -78,6 +78,10 @@ if "authentication_status" not in st.session_state:
 # 認証試行フラグを初期化
 if "login_attempted" not in st.session_state:
     st.session_state["login_attempted"] = False
+# 致命的なレンダリングエラーフラグ
+if "auth_render_error" not in st.session_state:
+    st.session_state["auth_render_error"] = False
+
 
 # authenticatorが初期化されているか確認
 if authenticator:
@@ -93,8 +97,8 @@ if authenticator:
         st.session_state["username"] = username
 
     except Exception as e:
-        # 修正1: cookie_handlerが失敗した場合、エラーメッセージはコンソールに出力し、
-        # 認証状態をリセットするのみに留める。st.sidebar.errorはログインフォーム表示側で行う。
+        # cookie_handlerが失敗した場合、エラーメッセージはコンソールに出力し、
+        # 認証状態をリセットするのみに留める。
         print(f"Cookie Handler Error (Session Reset): {e}")
         st.session_state["authentication_status"] = False
         st.session_state["name"] = None
@@ -123,31 +127,33 @@ if authenticator:
                 
                 # ログイン試行が実行されたことをマーク（エラーが出ない限りTrue）
                 st.session_state["login_attempted"] = True
+                st.session_state["auth_render_error"] = False # エラーは発生しなかった
 
             except Exception as e:
-                # 修正2: 認証フォームの表示中の例外をキャッチし、明確にリロードを促す
+                # 致命的なレンダリングエラーをキャッチ
+                st.session_state["auth_render_error"] = True # エラーフラグを立てる
                 st.sidebar.error(f"認証フォームの表示中に致命的なエラーが発生しました。ブラウザをリロードしてください。")
                 print(f"Login Widget Rendering Error: {e}")
                 
         # 3. 認証後のメッセージ表示ロジック
         
-        # ユーザーが認証に失敗した（False）場合
-        if st.session_state["authentication_status"] is False:
-            # cookie_handlerまたはlogin()でFalseになった場合
-            st.sidebar.error("ユーザー名またはパスワードが間違っているか、セッションが期限切れです。")
-            st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-            st.session_state["login_attempted"] = False # リセット
+        # 致命的なレンダリングエラーが発生していない場合のみ、通常のメッセージを表示
+        if not st.session_state["auth_render_error"]:
             
-        # ログアウト直後、または初回訪問時（None）
-        elif st.session_state["authentication_status"] is None:
-            # 修正3: cookie_handlerがエラーを吐いた場合にもここでメッセージを出す
-            st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-            
-            # cookie_handlerがエラーを吐いた場合のサイドバー表示
-            if 'Cookie Handler Error' in st.session_state.get('last_error', ''):
-                 st.sidebar.error("セッションの読み込み中にエラーが発生しました。再度ログインしてください。")
-            else:
-                 st.sidebar.info("ユーザー名とパスワードを入力してください。")
+            # ユーザーが認証に失敗した（False）場合
+            if st.session_state["authentication_status"] is False:
+                # cookie_handlerまたはlogin()でFalseになった場合
+                st.sidebar.error("ユーザー名またはパスワードが間違っているか、セッションが期限切れです。")
+                st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+                st.session_state["login_attempted"] = False # リセット
+                
+            # ログアウト直後、または初回訪問時（None）
+            elif st.session_state["authentication_status"] is None:
+                # cookie_handlerがエラーを吐いた場合のサイドバー表示
+                # Note: last_errorは使用しないため、代わりに cookie_handlerのtry/exceptでFalseにリセットされたことを利用する
+                
+                st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+                st.sidebar.info("ユーザー名とパスワードを入力してください。")
 
 
     
