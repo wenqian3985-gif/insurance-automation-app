@@ -9,7 +9,7 @@ from pdf2image import convert_from_bytes
 from PIL import Image
 import streamlit_authenticator as stauth
 from streamlit_authenticator import Hasher
-import time # timeモジュールを追加
+import time
 
 # ======================
 # 環境設定・デザイン
@@ -47,7 +47,7 @@ try:
         "cookie": {
             # 修正: 'cookie'キーは存在しないため、直接 'cookie_name' と 'cookie_key' を参照する
             "name": st.secrets["auth"]["cookie_name"],
-            "key": st.secrets["auth"]["cookie_key"], # 修正箇所
+            "key": st.secrets["auth"]["cookie_key"],
             "expiry_days": st.secrets["auth"]["expiry_days"],
         },
         "preauthorized": {"emails": []}
@@ -61,9 +61,26 @@ try:
         config_auth["cookie"]["expiry_days"],
         force_update=True
     )
+    # 認証初期化成功時のログ（デバッグ用）
+    print("Authentication initialized successfully.")
+
 except Exception as e:
+    # 認証初期化失敗時の詳細なログを出力 (デバッグを容易にするため)
+    print(f"Authentication Initialization Failed: {e}")
+    # config_authの内容をコンソールに出力してSecretsの設定ミスを確認
+    try:
+        debug_info = {
+            "usernames_keys": list(st.secrets["auth"]["credentials"]["usernames"].keys()),
+            "cookie_name": st.secrets["auth"]["cookie_name"],
+            "expiry_days": st.secrets["auth"]["expiry_days"]
+        }
+        print(f"Debug Info (Secrets Check): {debug_info}")
+    except Exception as debug_e:
+        print(f"Could not print debug info: {debug_e}")
+        
     st.error(f"ログイン画面の初期化に失敗しました。Secretsの設定を確認してください。エラー: {e}")
     authenticator = None 
+    st.stop() # 致命的なエラーのためここで停止
 
 
 # ======================
@@ -82,7 +99,6 @@ if "login_attempted" not in st.session_state:
 if "auth_render_error" not in st.session_state:
     st.session_state["auth_render_error"] = False
 
-
 # authenticatorが初期化されているか確認
 if authenticator:
     
@@ -91,8 +107,18 @@ if authenticator:
         st.error("❌ 認証フォームのレンダリング中に致命的なエラーが検出されました。")
         # 永続的なエラーへの対処法として、キャッシュクリアを促すメッセージを追加
         st.warning("この問題を解決するためには、**ブラウザをリロード**するか、問題が続く場合は**ブラウザのキャッシュをクリア**してください。")
-        # ユーザーにリロードを促し、他のウィジェットやメッセージのレンダリングを停止
-        st.stop()
+        
+        # 強制リセットを試みるためのロジックを追加 (Streamlit v1.23+ の場合のみ有効)
+        # クエリパラメータを変更することで、セッションの強制的なリセットを試みる
+        try:
+             # st.experimental_set_query_params(reset_session=time.time()) は
+             # st.runtime.set_query_params(reset_session=time.time()) に置き換えが必要
+             # ただし、ここでは互換性を考慮して st.stop() で処理を停止する
+             pass 
+        except Exception:
+             pass 
+
+        st.stop() # ユーザーにリロードを促し、他のウィジェットやメッセージのレンダリングを停止
 
     # 1. Cookieによる認証状態をチェック
     try:
@@ -150,12 +176,10 @@ if authenticator:
                 # エラーが発生した場合、認証ステータスをNoneにリセット
                 st.session_state["authentication_status"] = None
                 
-                # 【修正】致命的エラーフラグを立てたので、ここで処理を停止し、L130 の st.stop() に処理を移す
-                st.stop() # st.rerun() から st.stop() に変更
+                # 致命的エラーフラグを立てたので、ここで処理を停止し、L130 の st.stop() に処理を移す
+                st.stop()
                 
         # 3. 認証後のメッセージ表示ロジック
-        
-        # L130で st.stop() を使用するため、ここでは auth_render_error のチェックは不要
         
         # ユーザーが認証に失敗した（False）場合
         if st.session_state["authentication_status"] is False:
