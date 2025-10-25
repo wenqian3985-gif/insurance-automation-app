@@ -73,14 +73,12 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
-    # 【再修正点】TypeError回避のため、戻り値のアンパックを4つに戻し（最新バージョン準拠）、
-    # 'pre_login=False' を追加して、より安定したログインフォームの挙動を強制します。
-    # 戻り値: name, authentication_status, username, pre_login_form_key
-    name, authentication_status, username, _ = authenticator.login(
+    # 【最終修正点】TypeError回避のため、戻り値を最も一般的な3つに戻し、
+    # 互換性問題を避けるため、keyとpre_login引数を削除します。
+    # 戻り値: name, authentication_status, username
+    name, authentication_status, username = authenticator.login(
         fields={'Form name': 'ログイン'}, # フォーム名をキーワードで指定 (fields引数)
-        location='main',                     # locationをキーワードで指定 (location引数)
-        key='login_form',                    # Streamlitウィジェットのキーを追加
-        pre_login=False                      # 互換性確保のため追加
+        location='main'                      # locationをキーワードで指定 (location引数)
     )
 
     # 認証ステータスに応じた処理
@@ -164,7 +162,7 @@ if authenticator:
                              contents.append(img) # PIL Imageオブジェクトを直接渡す
                              if i >= 2: break # 3ページ目までで十分とする
                     except Exception as img_e:
-                        st.error(f"[{pdf_name}] 画像変換に失敗しました: {img_e}")
+                        st.error(f"[{pdf.name}] 画像変換に失敗しました: {img_e}")
                         return None
 
                 try:
