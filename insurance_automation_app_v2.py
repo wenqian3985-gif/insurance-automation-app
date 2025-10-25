@@ -58,6 +58,8 @@ try:
         config_auth["cookie"]["name"],
         config_auth["cookie"]["key"],
         config_auth["cookie"]["expiry_days"],
+        # 【修正点】ロードエラー回避のため、force_update=Trueを追加し、コンポーネントのフォールバックを有効化
+        force_update=True
     )
 except Exception as e:
     st.error(f"ログイン画面の初期化に失敗しました。Secretsの設定を確認してください。エラー: {e}")
