@@ -82,11 +82,9 @@ if "login_attempted" not in st.session_state:
 # authenticatorが初期化されているか確認
 if authenticator:
     
-    # 1. Cookieによる認証状態をチェック (st.session_state["authentication_status"] が None の場合のみ)
-    # アプリ実行のたびにcookie_handlerを呼び出すことで、セッション状態を最新に保つ
+    # 1. Cookieによる認証状態をチェック
     try:
         # Cookieによる認証状態をチェックし、セッションに反映
-        # 戻り値は (name, authentication_status, username)
         name, authentication_status, username = authenticator.cookie_handler()
         
         # 認証状態の更新
@@ -95,9 +93,9 @@ if authenticator:
         st.session_state["username"] = username
 
     except Exception as e:
-        # cookie_handlerが失敗した場合、ログアウト状態にして再ログインを促す
-        st.sidebar.error("セッションの読み込み中にエラーが発生しました。再度ログインしてください。")
-        print(f"Cookie Handler Error: {e}")
+        # 修正1: cookie_handlerが失敗した場合、エラーメッセージはコンソールに出力し、
+        # 認証状態をリセットするのみに留める。st.sidebar.errorはログインフォーム表示側で行う。
+        print(f"Cookie Handler Error (Session Reset): {e}")
         st.session_state["authentication_status"] = False
         st.session_state["name"] = None
         st.session_state["username"] = None
@@ -110,40 +108,47 @@ if authenticator:
         with st.sidebar:
             st.title("ログイン (安定版)")
             
-            # stauth.login()を呼び出す。結果はcookie_handlerで自動的に処理される
+            # 認証フォームのレンダリング
             try:
-                # 認証処理を実行。戻り値は無視し、cookie_handlerの結果を信頼する
-                authenticator.login(
+                # 認証処理を実行。stauth.login()の結果を直接受け取る
+                name, authentication_status, username = authenticator.login(
                     "ログイン", 
                     "sidebar" 
                 )
                 
-                # ログイン試行が成功/失敗にかかわらず実行されたことをマーク（フォームのレンダリングが完了したことを意味する）
+                # 認証結果をセッション状態に反映させる
+                st.session_state["authentication_status"] = authentication_status
+                st.session_state["name"] = name
+                st.session_state["username"] = username
+                
+                # ログイン試行が実行されたことをマーク（エラーが出ない限りTrue）
                 st.session_state["login_attempted"] = True
 
             except Exception as e:
-                # 認証処理中の例外をキャッチ
-                error_message = str(e)
-                
-                # エラーメッセージをサイドバーに表示
-                st.sidebar.error(f"認証フォームの表示中にエラーが発生しました。ブラウザをリロードしてください。")
-                print(f"Login Widget Error: {e}")
+                # 修正2: 認証フォームの表示中の例外をキャッチし、明確にリロードを促す
+                st.sidebar.error(f"認証フォームの表示中に致命的なエラーが発生しました。ブラウザをリロードしてください。")
+                print(f"Login Widget Rendering Error: {e}")
                 
         # 3. 認証後のメッセージ表示ロジック
         
-        # ユーザーが認証に失敗した（False）かつ、ログインを試行した（login_attempted）場合
-        # stauth.login()は認証に失敗するとFalseを返すため、このチェックを行う
+        # ユーザーが認証に失敗した（False）場合
         if st.session_state["authentication_status"] is False:
-            if st.session_state["login_attempted"]:
-                st.sidebar.error("ユーザー名またはパスワードが間違っています。")
-            
+            # cookie_handlerまたはlogin()でFalseになった場合
+            st.sidebar.error("ユーザー名またはパスワードが間違っているか、セッションが期限切れです。")
             st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
             st.session_state["login_attempted"] = False # リセット
             
         # ログアウト直後、または初回訪問時（None）
         elif st.session_state["authentication_status"] is None:
+            # 修正3: cookie_handlerがエラーを吐いた場合にもここでメッセージを出す
             st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-            st.sidebar.info("ユーザー名とパスワードを入力してください。")
+            
+            # cookie_handlerがエラーを吐いた場合のサイドバー表示
+            if 'Cookie Handler Error' in st.session_state.get('last_error', ''):
+                 st.sidebar.error("セッションの読み込み中にエラーが発生しました。再度ログインしてください。")
+            else:
+                 st.sidebar.info("ユーザー名とパスワードを入力してください。")
+
 
     
     # 4. メインコンテンツの表示 (認証成功時)
