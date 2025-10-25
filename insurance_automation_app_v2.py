@@ -9,6 +9,7 @@ from pdf2image import convert_from_bytes
 from PIL import Image
 import streamlit_authenticator as stauth
 from streamlit_authenticator import Hasher
+import time # timeモジュールを追加
 
 # ======================
 # 環境設定・デザイン
@@ -45,12 +46,12 @@ try:
         },
         "cookie": {
             "name": st.secrets["auth"]["cookie_name"],
-            "key": st.secrets["auth"]["cookie_key"],
+            "key": st.secrets["auth"]["cookie"]["key"], # ここは正しいキーを参照
             "expiry_days": st.secrets["auth"]["expiry_days"],
         },
         "preauthorized": {"emails": []}
     }
-
+    
     # Authenticateオブジェクトの初期化
     authenticator = stauth.Authenticate(
         config_auth["credentials"],
@@ -125,14 +126,18 @@ if authenticator:
                 # Locationエラーなどの例外をキャッチ
                 error_message = str(e)
                 
-                # エラーメッセージをサイドバーに表示し、メインパネルのエラー表示は削除
+                # エラーメッセージをサイドバーに表示
                 st.sidebar.error(f"認証処理中にエラーが発生しました。再試行してください。")
                 
                 # Locationエラーを検出した場合、認証をリセットして再試行を促す
                 if "Location must be one of" in error_message:
-                     # 認証状態をリセットすることで、次の実行でフォームが再描画される
+                     # 認証状態をリセット
                      st.session_state["authentication_status"] = None
                      st.session_state["login_attempted"] = False
+                     
+                     # 強制的に再実行を遅延させてフォームの再描画を待つ
+                     time.sleep(0.5) 
+                     st.experimental_rerun() # 再実行を指示
                 
                 # 念のため、認証失敗としてマーク
                 st.session_state["authentication_status"] = False
