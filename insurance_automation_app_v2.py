@@ -58,7 +58,7 @@ try:
         config_auth["cookie"]["name"],
         config_auth["cookie"]["key"],
         config_auth["cookie"]["expiry_days"],
-        # 【修正点】ロードエラー回避のため、force_update=Trueを追加し、コンポーネントのフォールバックを有効化
+        # ロードエラー回避のため、force_update=Trueを追加し、コンポーネントのフォールバックを有効化
         force_update=True
     )
 except Exception as e:
@@ -73,12 +73,11 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
-    # 【最終修正点】ValueError (Location must be one of ...) 回避のため、
-    # フォームタイトルとlocationの両方を位置引数として渡すように修正します。
-    # 戻り値は以前のTypeError対策として4つ維持します。
+    # 【抜本的修正点】locationのValueErrorを回避するため、
+    # fieldsとlocationの両方をキーワード引数で明示的に指定します。
     name, authentication_status, username, _ = authenticator.login(
-        "ログイン", # 1番目の位置引数: フォームタイトル
-        "main"     # 2番目の位置引数: location (必須)
+        fields={'Form name': 'ログイン'}, # フォーム名をキーワードで指定 (fields引数)
+        location='main'                     # locationをキーワードで指定 (location引数)
     )
 
     # 認証ステータスに応じた処理
