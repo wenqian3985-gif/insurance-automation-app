@@ -100,63 +100,42 @@ if authenticator:
             st.session_state["username"] = None
 
 
-    # Streamlitネイティブのformを使用して、ログインボタンのクリックイベントを強制的に有効にする
-    if st.session_state["authentication_status"] is None or st.session_state["authentication_status"] is False:
+    # 認証ステータスがNoneまたはFalseの場合、ログインフォームを表示
+    if st.session_state["authentication_status"] in (None, False):
+        # ログインフォームを直接サイドバーにレンダリングする
         with st.sidebar:
             st.title("ログイン (安定版)")
             
-            # st.formを使用して、ボタンのクリックイベントをStreamlitに確実に捕捉させる
-            with st.form("native_login_form", clear_on_submit=False):
-                username_input = st.text_input("ユーザー名")
-                password_input = st.text_input("パスワード", type="password")
-                # フォームのボタンはStreamlitの最も信頼性の高いクリックトリガー
-                submitted = st.form_submit_button("ログイン")
-            
-            # フォームが送信された場合、手動で認証を試みる
-            if submitted:
-                # 認証処理
-                try:
-                    # ★修正箇所: location='sidebar'を削除。Streamlitのカスタムフォーム内では不要。
-                    name, authentication_status, username = authenticator.login(
-                        username_input, 
-                        password_input, 
-                        # location='sidebar' <-- この引数を削除
-                    )
-                    
-                    # 認証結果をセッション状態に保存し、Streamlitの再実行を促す
-                    st.session_state["authentication_status"] = authentication_status
-                    st.session_state["name"] = name
-                    st.session_state["username"] = username
+            # stauthのloginメソッドを直接呼び出す（Streamlitのネイティブフォームを使用しない方法に戻す）
+            # これがライブラリの本来の使い方であり、 location='sidebar' を明示する
+            # st.experimental_rerun() は stauth.login() 内部で処理されるため、カスタムフォームは不要
+            try:
+                name, authentication_status, username = authenticator.login(
+                    "ログイン", 
+                    "sidebar" # location='sidebar' を明示
+                )
+                
+                # stauth.login() は認証ステータスをセッションに設定するが、
+                # 念のため、結果をセッション状態に反映させる
+                st.session_state["authentication_status"] = authentication_status
+                st.session_state["name"] = name
+                st.session_state["username"] = username
+                
+            except Exception as e:
+                # 認証中に発生しうる予期せぬエラー
+                # エラーが'Location must be one of...'であれば、それはStreamlitの実行タイミングの問題
+                st.error(f"認証処理中にエラーが発生しました: {e}")
 
-                    # 認証結果に応じたメッセージ
-                    if authentication_status:
-                        st.success(f"ログイン成功: {name}さん")
-                        # 成功した場合、アプリ全体を再実行してメインコンテンツを表示させる
-                        st.experimental_rerun() 
-                    elif authentication_status is False:
-                        st.error("ユーザー名またはパスワードが間違っています。")
-                    else:
-                        # ここには到達しないはずだが、念のため
-                        st.info("認証情報を入力してください。")
 
-                except Exception as e:
-                    # 認証中に発生しうる予期せぬエラー
-                    st.error(f"認証処理中にエラーが発生しました: {e}")
-
-            # ログイン前のメッセージ
-            if st.session_state["authentication_status"] is None:
-                st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-                st.sidebar.info("ユーザー名とパスワードを入力してください。")
-            elif st.session_state["authentication_status"] is False:
-                # cookie_handlerエラーまたは認証失敗時にこのメッセージが表示される
-                st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-                # cookie_handlerのエラーメッセージがある場合はそれを優先、ない場合は通常の失敗メッセージ
-                if st.session_state.get("cookie_error", False):
-                    st.sidebar.error("ログイン情報が無効です。再度入力してください。")
-                    # エラーフラグをクリア
-                    st.session_state["cookie_error"] = False
-                else:
-                    st.sidebar.error("ユーザー名またはパスワードが間違っています。")
+        # 認証後のメッセージ表示ロジック
+        if st.session_state["authentication_status"] is False:
+            # 認証失敗時のエラーメッセージ
+            st.sidebar.error("ユーザー名またはパスワードが間違っています。")
+            st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+        elif st.session_state["authentication_status"] is None:
+            # 初回訪問時、またはログアウト後の情報メッセージ
+            st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+            st.sidebar.info("ユーザー名とパスワードを入力してください。")
 
     
     # メインコンテンツの表示
