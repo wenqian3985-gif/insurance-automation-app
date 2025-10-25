@@ -99,7 +99,8 @@ def force_session_reset():
     st.session_state["auth_render_error"] = False
     st.success("セッション状態をリセットしました。アプリケーションが再起動します。")
     time.sleep(1) # メッセージ表示のための短い待機
-    st.experimental_rerun()
+    # 修正: st.experimental_rerun() を st.rerun() に変更
+    st.rerun()
 
 
 # authenticatorが初期化されているか確認
@@ -164,7 +165,8 @@ if authenticator:
                 st.session_state["authentication_status"] = None
                 
                 # エラーフラグを立てた後、メイン処理 L135 の st.stop() に処理を移す
-                st.experimental_rerun()
+                # 修正: st.experimental_rerun() を st.rerun() に変更
+                st.rerun()
                 
         # 3. 認証後のメッセージ表示ロジック
         if st.session_state["authentication_status"] is False:
