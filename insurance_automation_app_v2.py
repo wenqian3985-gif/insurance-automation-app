@@ -86,6 +86,13 @@ if "auth_render_error" not in st.session_state:
 # authenticatorが初期化されているか確認
 if authenticator:
     
+    # 【修正】致命的なレンダリングエラーが発生している場合、ここで処理を停止し、明確なメッセージのみを表示
+    if st.session_state["auth_render_error"]:
+        st.error("❌ 認証フォームのレンダリング中に致命的なエラーが検出されました。")
+        st.warning("この問題を解決するためには、**ブラウザをリロード（再読み込み）**してください。")
+        # ユーザーにリロードを促し、他のウィジェットやメッセージのレンダリングを停止
+        st.stop()
+
     # 1. Cookieによる認証状態をチェック
     try:
         # Cookieによる認証状態をチェックし、セッションに反映
@@ -139,28 +146,30 @@ if authenticator:
                 st.sidebar.error(f"認証フォームの表示中に致命的なエラーが発生しました。ブラウザをリロードしてください。")
                 print(f"Login Widget Rendering Error: {e}")
                 
-                # エラーが発生した場合、認証ステータスをNoneにリセットし、
-                # 後のロジックで「ユーザー名またはパスワード間違い」のメッセージが出ないようにする
+                # エラーが発生した場合、認証ステータスをNoneにリセット
                 st.session_state["authentication_status"] = None
+                
+                # 【修正】致命的エラーフラグを立てたので、ここで再実行し、L130 の st.stop() に処理を移す
+                st.rerun() 
                 
         # 3. 認証後のメッセージ表示ロジック
         
         # 致命的なレンダリングエラーが発生していない場合のみ、通常のメッセージを表示
-        if not st.session_state["auth_render_error"]:
+        # L130で st.stop() を使用するため、ここでは auth_render_error のチェックは不要
+        
+        # ユーザーが認証に失敗した（False）場合
+        if st.session_state["authentication_status"] is False:
+            # cookie_handlerまたはlogin()でFalseになった場合
+            st.sidebar.error("ユーザー名またはパスワードが間違っているか、セッションが期限切れです。")
+            st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+            st.session_state["login_attempted"] = False # リセット
             
-            # ユーザーが認証に失敗した（False）場合
-            if st.session_state["authentication_status"] is False:
-                # cookie_handlerまたはlogin()でFalseになった場合
-                st.sidebar.error("ユーザー名またはパスワードが間違っているか、セッションが期限切れです。")
-                st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-                st.session_state["login_attempted"] = False # リセット
-                
-            # ログアウト直後、または初回訪問時（None）
-            elif st.session_state["authentication_status"] is None:
-                # cookie_handlerがエラーを吐いた場合のサイドバー表示
-                
-                st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-                st.sidebar.info("ユーザー名とパスワードを入力してください。")
+        # ログアウト直後、または初回訪問時（None）
+        elif st.session_state["authentication_status"] is None:
+            # cookie_handlerがエラーを吐いた場合のサイドバー表示
+            
+            st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+            st.sidebar.info("ユーザー名とパスワードを入力してください。")
 
 
     
