@@ -61,13 +61,13 @@ try:
     }
     
     # Authenticateオブジェクトの初期化
+    # 修正: セッションベースの認証に切り替えるため、'key'引数にセッションキーを指定
     authenticator = stauth.Authenticate(
         config_auth["credentials"],
         config_auth["cookie"]["name"],
         config_auth["cookie"]["key"],
-        config_auth["cookie"]["expiry_days"]
-        # 修正: force_update=True パラメータを削除 (レンダリング競合の回避)
-        # force_update=True
+        config_auth["cookie"]["expiry_days"],
+        key='streamlit_auth_session_key_v2' # 認証情報をセッション状態に保存する
     )
     print("Authentication initialized successfully.")
 
@@ -99,9 +99,9 @@ if authenticator:
     def force_session_reset():
         """セッション状態と認証クッキーをクリアし、強制的に再実行する"""
         try:
-            # 1. 認証クッキーを削除 (最重要)
-            if authenticator.cookie_manager:
-                authenticator.cookie_manager.delete(authenticator.cookie_name)
+            # 1. 認証クッキーを削除 (セッションベースに切り替えたため、不要だが念のため残す)
+            # if authenticator.cookie_manager:
+            #     authenticator.cookie_manager.delete(authenticator.cookie_name)
             
             # 2. セッション状態をクリア
             st.session_state["authentication_status"] = None
@@ -109,6 +109,10 @@ if authenticator:
             st.session_state["username"] = None
             st.session_state["auth_render_error"] = False
             
+            # 認証セッションキーもクリア
+            if 'streamlit_auth_session_key_v2' in st.session_state:
+                del st.session_state['streamlit_auth_session_key_v2']
+
             st.success("セッションとクッキーをリセットしました。アプリケーションが再起動します。")
             time.sleep(1) # メッセージ表示のための短い待機
             st.rerun()
@@ -132,32 +136,36 @@ if authenticator:
 
         st.stop() # 処理を停止
 
-    # 1. Cookieによる認証状態をチェック
-    try:
-        name, authentication_status, username = authenticator.cookie_handler()
+    # 1. Cookieによる認証状態をチェック (セッションベースに切り替えたため、認証ロジックは login() に任せる)
+    # try:
+    #     name, authentication_status, username = authenticator.cookie_handler()
         
-        st.session_state["authentication_status"] = authentication_status
-        st.session_state["name"] = name
-        st.session_state["username"] = username
+    #     st.session_state["authentication_status"] = authentication_status
+    #     st.session_state["name"] = name
+    #     st.session_state["username"] = username
         
-        if authentication_status is True:
-            st.session_state["auth_render_error"] = False
+    #     if authentication_status is True:
+    #         st.session_state["auth_render_error"] = False
 
-    except Exception as e:
-        print(f"Cookie Handler Error (Session Reset): {e}")
-        st.session_state["authentication_status"] = False
-        st.session_state["name"] = None
-        st.session_state["username"] = None
+    # except Exception as e:
+    #     print(f"Cookie Handler Error (Session Reset): {e}")
+    #     st.session_state["authentication_status"] = False
+    #     st.session_state["name"] = None
+    #     st.session_state["username"] = None
 
 
     # 2. 認証ステータスがNoneまたはFalseの場合、ログインフォームを表示
-    if st.session_state["authentication_status"] in (None, False):
-        
+    # セッションベースの場合、認証状態は st.session_state['authentication_status'] ではなく、
+    # authenticator.login() の結果によって更新される
+    
+    # ログインフォームは常に試行する
+    if not st.session_state["authentication_status"]:
         with st.sidebar:
             st.title("ログイン")
             
             # 認証フォームのレンダリング
             try:
+                # 認証処理を行う
                 name, authentication_status, username = authenticator.login(
                     "ログイン", 
                     "sidebar" 
@@ -377,4 +385,3 @@ if authenticator:
 elif not authenticator:
     st.error("❌ 認証設定のロードに失敗しました。アプリケーションを起動できません。")
     st.stop()
-
