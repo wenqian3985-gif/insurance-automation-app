@@ -74,11 +74,8 @@ except Exception as e:
 # authenticatorが初期化されているか確認
 if authenticator:
     
-    # 【再修正】非応答性の問題を解決するため、認証ロジックを簡素化します。
-    # 以前の複雑なアンパック処理を削除し、Streamlit Authenticatorの標準的な
-    # try...except ValueError パターンを使用します。
-    # これにより、ログインボタンがクリックされたときに Streamlit の再実行が
-    # 適切にトリガーされることを期待します。
+    # 【最終修正】TypeError（NoneType object）とValueError（アンパック失敗）の両方を捕捉し、
+    # ログインフォームの安定性と応答性を確保します。
     name, authentication_status, username = None, None, None
     try:
         # 認証フォームを表示し、結果を変数に格納 (3つの戻り値を期待)
@@ -86,9 +83,8 @@ if authenticator:
             fields={'Form name': 'ログイン'},
             location='main'
         )
-    except ValueError:
-        # 戻り値の数が合わない（初期描画時、または4つの戻り値の可能性がある場合）
-        # この場合、authentication_statusはNoneのまま
+    except (ValueError, TypeError):
+        # 戻り値の数が合わない（ValueError）か、Noneが返された場合（TypeError）を捕捉し、無視
         pass
     except Exception as e:
         # その他の予期せぬエラー
