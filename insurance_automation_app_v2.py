@@ -24,6 +24,13 @@ html, body, [class*="css"] {
 }
 .main-header { font-size: 2.2rem; font-weight: 800; color: #1f77b4; text-align: center; margin-bottom: 1.5rem; }
 .section-header { font-size: 1.4rem; font-weight: bold; color: #2ca02c; margin-top: 1.5rem; margin-bottom: 0.8rem; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
+/* 強制リセットボタンのスタイル */
+.reset-button button { 
+    background-color: #ff4b4b !important;
+    border-color: #ff4b4b !important;
+    color: white !important;
+    font-weight: bold;
+}
 .stButton>button { border-radius: 8px; border: 1px solid #2ca02c; color: white; background-color: #2ca02c; }
 </style>
 """, unsafe_allow_html=True)
@@ -45,7 +52,7 @@ try:
             "usernames": st.secrets["auth"]["credentials"]["usernames"]
         },
         "cookie": {
-            # 修正: 'cookie'キーは存在しないため、直接 'cookie_name' と 'cookie_key' を参照する
+            # Secretsから直接設定値を参照
             "name": st.secrets["auth"]["cookie_name"],
             "key": st.secrets["auth"]["cookie_key"],
             "expiry_days": st.secrets["auth"]["expiry_days"],
@@ -61,82 +68,69 @@ try:
         config_auth["cookie"]["expiry_days"],
         force_update=True
     )
-    # 認証初期化成功時のログ（デバッグ用）
     print("Authentication initialized successfully.")
 
 except Exception as e:
-    # 認証初期化失敗時の詳細なログを出力 (デバッグを容易にするため)
+    # 認証初期化失敗時の詳細なログを出力
     print(f"Authentication Initialization Failed: {e}")
-    # config_authの内容をコンソールに出力してSecretsの設定ミスを確認
-    try:
-        debug_info = {
-            "usernames_keys": list(st.secrets["auth"]["credentials"]["usernames"].keys()),
-            "cookie_name": st.secrets["auth"]["cookie_name"],
-            "expiry_days": st.secrets["auth"]["expiry_days"]
-        }
-        print(f"Debug Info (Secrets Check): {debug_info}")
-    except Exception as debug_e:
-        print(f"Could not print debug info: {debug_e}")
-        
     st.error(f"ログイン画面の初期化に失敗しました。Secretsの設定を確認してください。エラー: {e}")
     authenticator = None 
-    st.stop() # 致命的なエラーのためここで停止
+    st.stop() 
 
 
 # ======================
 # ログインフォームと認証
 # ======================
 
-# セッション状態に認証ステータスを初期化
+# セッション状態の初期化
 if "authentication_status" not in st.session_state:
     st.session_state["authentication_status"] = None
     st.session_state["name"] = None
     st.session_state["username"] = None
-# 認証試行フラグを初期化
-if "login_attempted" not in st.session_state:
-    st.session_state["login_attempted"] = False
-# 致命的なレンダリングエラーフラグ
 if "auth_render_error" not in st.session_state:
     st.session_state["auth_render_error"] = False
+
+# 強制リセット関数
+def force_session_reset():
+    """セッション状態をクリアし、強制的に再実行する"""
+    st.session_state["authentication_status"] = None
+    st.session_state["name"] = None
+    st.session_state["username"] = None
+    st.session_state["auth_render_error"] = False
+    st.success("セッション状態をリセットしました。アプリケーションが再起動します。")
+    time.sleep(1) # メッセージ表示のための短い待機
+    st.experimental_rerun()
+
 
 # authenticatorが初期化されているか確認
 if authenticator:
     
-    # 【修正】致命的なレンダリングエラーが発生している場合、ここで処理を停止し、明確なメッセージのみを表示
+    # 【修正: 致命的なレンダリングエラー発生時の処理】
     if st.session_state["auth_render_error"]:
         st.error("❌ 認証フォームのレンダリング中に致命的なエラーが検出されました。")
-        # 永続的なエラーへの対処法として、キャッシュクリアを促すメッセージを追加
-        st.warning("この問題を解決するためには、**ブラウザをリロード**するか、問題が続く場合は**ブラウザのキャッシュをクリア**してください。")
+        st.warning("この問題は、Streamlitのセッション状態が不安定になっていることが原因である可能性があります。")
+        st.info("通常の解決策（リロード、キャッシュクリア）で解決しない場合は、以下の**最終手段**をお試しください。")
         
-        # 強制リセットを試みるためのロジックを追加 (Streamlit v1.23+ の場合のみ有効)
-        # クエリパラメータを変更することで、セッションの強制的なリセットを試みる
-        try:
-             # st.experimental_set_query_params(reset_session=time.time()) は
-             # st.runtime.set_query_params(reset_session=time.time()) に置き換えが必要
-             # ただし、ここでは互換性を考慮して st.stop() で処理を停止する
-             pass 
-        except Exception:
-             pass 
+        # 最終手段として、強制リセットボタンを表示
+        st.markdown('<div class="reset-button">', unsafe_allow_html=True)
+        if st.button("🔴 セッション強制リセット (最終手段)", on_click=force_session_reset):
+             pass # on_clickで処理が実行される
+        st.markdown('</div>', unsafe_allow_html=True)
 
-        st.stop() # ユーザーにリロードを促し、他のウィジェットやメッセージのレンダリングを停止
+        st.stop() # 処理を停止
 
     # 1. Cookieによる認証状態をチェック
     try:
-        # Cookieによる認証状態をチェックし、セッションに反映
         name, authentication_status, username = authenticator.cookie_handler()
         
-        # 認証状態の更新
         st.session_state["authentication_status"] = authentication_status
         st.session_state["name"] = name
         st.session_state["username"] = username
         
-        # 認証成功時はレンダリングエラーフラグをクリア
         if authentication_status is True:
             st.session_state["auth_render_error"] = False
 
     except Exception as e:
-        # cookie_handlerが失敗した場合、エラーメッセージはコンソールに出力し、
-        # 認証状態をリセットするのみに留める。
         print(f"Cookie Handler Error (Session Reset): {e}")
         st.session_state["authentication_status"] = False
         st.session_state["name"] = None
@@ -146,13 +140,11 @@ if authenticator:
     # 2. 認証ステータスがNoneまたはFalseの場合、ログインフォームを表示
     if st.session_state["authentication_status"] in (None, False):
         
-        # ログインフォームを直接サイドバーにレンダリングする
         with st.sidebar:
-            st.title("ログイン (安定版)")
+            st.title("ログイン")
             
             # 認証フォームのレンダリング
             try:
-                # 認証処理を実行。stauth.login()の結果を直接受け取る
                 name, authentication_status, username = authenticator.login(
                     "ログイン", 
                     "sidebar" 
@@ -163,35 +155,23 @@ if authenticator:
                 st.session_state["name"] = name
                 st.session_state["username"] = username
                 
-                # ログイン試行が実行されたことをマーク（エラーが出ない限りTrue）
-                st.session_state["login_attempted"] = True
                 st.session_state["auth_render_error"] = False # エラーは発生しなかった
 
             except Exception as e:
-                # 致命的なレンダリングエラーをキャッチ
-                st.session_state["auth_render_error"] = True # エラーフラグを立てる
-                st.sidebar.error(f"認証フォームの表示中に致命的なエラーが発生しました。ブラウザをリロードしてください。")
+                # 致命的なレンダリングエラーをキャッチした場合はフラグを立てて停止
+                st.session_state["auth_render_error"] = True 
                 print(f"Login Widget Rendering Error: {e}")
-                
-                # エラーが発生した場合、認証ステータスをNoneにリセット
                 st.session_state["authentication_status"] = None
                 
-                # 致命的エラーフラグを立てたので、ここで処理を停止し、L130 の st.stop() に処理を移す
-                st.stop()
+                # エラーフラグを立てた後、メイン処理 L135 の st.stop() に処理を移す
+                st.experimental_rerun()
                 
         # 3. 認証後のメッセージ表示ロジック
-        
-        # ユーザーが認証に失敗した（False）場合
         if st.session_state["authentication_status"] is False:
-            # cookie_handlerまたはlogin()でFalseになった場合
             st.sidebar.error("ユーザー名またはパスワードが間違っているか、セッションが期限切れです。")
             st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-            st.session_state["login_attempted"] = False # リセット
             
-        # ログアウト直後、または初回訪問時（None）
         elif st.session_state["authentication_status"] is None:
-            # cookie_handlerがエラーを吐いた場合のサイドバー表示
-            
             st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
             st.sidebar.info("ユーザー名とパスワードを入力してください。")
 
@@ -220,36 +200,30 @@ if authenticator:
         # ======================
         # PDF抽出関数 (堅牢性向上)
         # ======================
-        # @st.cache_data を使用
         @st.cache_data
         def extract_text_from_pdf(pdf_bytes):
             """PDFからテキスト抽出"""
             try:
                 reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
-                # ページごとにテキストを結合。抽出失敗時は空文字
                 text = "\n\n".join([p.extract_text() or "" for p in reader.pages])
                 return text.strip()
             except Exception as e:
-                # 抽出エラーをログに残すが、処理は継続
                 print(f"PDFテキスト抽出エラー（PyPDF2）: {e}")
                 return ""
 
         @st.cache_data
         def convert_pdf_to_images(pdf_bytes):
             """PDFを画像に変換"""
-            # convert_from_bytesは重い処理のため、キャッシュを推奨
             return convert_from_bytes(pdf_bytes)
 
         # Gemini APIで情報抽出（キャッシュなし）
         def extract_info_with_gemini(pdf_bytes, fields, pdf_name):
             """Gemini APIで情報抽出"""
             
-            # 処理状況をユーザーに伝えるためのスピナーを追加
             with st.spinner(f"[{pdf_name}] Geminiによる情報抽出中..."):
                 text = extract_text_from_pdf(pdf_bytes)
                 example_json = {f: "" for f in fields}
 
-                # プロンプトをより明確にJSON形式を要求するように修正
                 prompt = (
                     f"以下の保険見積書（またはその画像）から、指定されたすべての項目を抽出出し、"
                     f"**必ず**JSON形式で返してください。不明な項目は空文字にしてください。\n"
@@ -259,32 +233,26 @@ if authenticator:
 
                 contents = [{"text": prompt}]
                 
-                # 1. まずはテキスト情報を使用
                 if text and len(text) > 100:
                     contents.append({"text": f"--- PDF TEXT START ---\n{text}"})
                 else:
-                    # 2. テキスト抽出が不十分または失敗した場合（画像として処理）
                     st.warning(f"[{pdf_name}] テキスト抽出が不十分なため、画像として処理します。")
                     try:
                         images = convert_pdf_to_images(pdf_bytes)
-                        # 最初の数ページのみを処理してトークン制限を回避
                         for i, img in enumerate(images[:5]):
-                             contents.append(img) # PIL Imageオブジェクトを直接渡す
-                             if i >= 2: break # 3ページ目までで十分とする
+                             contents.append(img)
+                             if i >= 2: break
                     except Exception as img_e:
                         st.error(f"[{pdf.name}] 画像変換に失敗しました: {img_e}")
                         return None
 
                 try:
-                    # generate_contentの引数を修正: contentsがリストの場合はそのまま渡す
                     response = model.generate_content(contents)
 
                     if not response or not response.text:
                         raise ValueError("Geminiの応答が空です。")
 
-                    # JSONパースの堅牢性を高めるために、応答からJSONブロックを抽出
                     clean_text = response.text.strip()
-                    # MarkdownのJSONブロック（```json ... ```）をクリーンアップ
                     if clean_text.startswith("```"):
                         clean_text = clean_text.replace("```json", "").replace("```", "").strip()
                     
@@ -293,7 +261,6 @@ if authenticator:
                     st.error(f"[{pdf.name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...")
                     return None
                 except Exception as e:
-                    # エラーメッセージに元のファイル名を含める
                     st.error(f"[{pdf.name}] Gemini API呼び出しエラー: {e}")
                     return None
 
@@ -301,9 +268,7 @@ if authenticator:
         # アプリ本体
         # ======================
         
-        # セッションステートの初期化をファイルのアップロード前に移動
         if "fields" not in st.session_state:
-            # デフォルトのフィールド設定
             st.session_state["fields"] = ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
         if "customer_df" not in st.session_state:
             st.session_state["customer_df"] = pd.DataFrame()
@@ -317,22 +282,18 @@ if authenticator:
         if customer_file:
             try:
                 df_customer = pd.read_excel(customer_file)
-                
-                # 列名を抽出フィールドとして設定
                 new_fields = df_customer.columns.tolist()
                 st.session_state["fields"] = new_fields
-                st.session_state["customer_df"] = df_customer # 顧客データもセッションに保存
+                st.session_state["customer_df"] = df_customer 
                 
                 st.success("✅ 顧客情報ファイルを読み込み、列名を抽出フィールドとして設定しました。")
                 st.dataframe(df_customer, use_container_width=True)
 
             except Exception as e:
                 st.error(f"Excelファイルの読み込みエラー: {e}")
-                # エラー時はデフォルト値に戻す
                 st.session_state["fields"] = ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
                 st.session_state["customer_df"] = pd.DataFrame()
                 
-        # 抽出フィールドの表示
         st.info(f"現在の抽出フィールド: {', '.join(st.session_state['fields'])}")
 
 
@@ -343,20 +304,16 @@ if authenticator:
             results = []
             fields = st.session_state["fields"]
 
-            # プログレスバーの追加
             progress_bar = st.progress(0)
             total_pdfs = len(uploaded_pdfs)
 
             for i, pdf in enumerate(uploaded_pdfs):
                 try:
-                    # PDFの読み込み
                     pdf_bytes = pdf.read()
-                    
                     data = extract_info_with_gemini(pdf_bytes, fields, pdf.name)
                     
                     if data:
                         data["ファイル名"] = pdf.name
-                        # 抽出フィールドに含まれないキーを削除
                         cleaned_data = {k: v for k, v in data.items() if k in fields or k == "ファイル名"}
                         results.append(cleaned_data)
                         st.success(f"✅ {pdf.name} 抽出成功")
@@ -366,15 +323,12 @@ if authenticator:
                 except Exception as e:
                     st.error(f"❌ {pdf.name} 処理中に予期せぬエラー: {str(e)}")
                 
-                # プログレスバーを更新
                 progress_bar.progress((i + 1) / total_pdfs)
             
-            progress_bar.empty() # 完了したらプログレスバーを消す
+            progress_bar.empty()
 
             if results:
-                # 抽出結果をDataFrameに変換し、セッションに保存
                 df = pd.DataFrame(results)
-                # 列順序をfieldsの順序に設定 (ファイル名を末尾に追加)
                 column_order = [f for f in fields if f in df.columns] + ["ファイル名"]
                 df = df.reindex(columns=column_order)
                 
@@ -385,11 +339,9 @@ if authenticator:
 
         st.markdown('<div class="section-header">📊 3. 抽出結果をダウンロード</div>', unsafe_allow_html=True)
         if not st.session_state["comparison_df"].empty:
-            # Excelファイルの書き込みを関数化し、@st.cache_dataでキャッシュ可能にする
             @st.cache_data
             def to_excel_bytes(df):
                 output = io.BytesIO()
-                # openpyxlエンジンを使用
                 with pd.ExcelWriter(output, engine="openpyxl") as writer:
                     df.to_excel(writer, index=False, sheet_name="見積情報比較表")
                 return output.getvalue()
