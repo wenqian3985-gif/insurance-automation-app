@@ -74,12 +74,14 @@ if "authentication_status" not in st.session_state:
     st.session_state["authentication_status"] = None
     st.session_state["name"] = None
     st.session_state["username"] = None
+# 認証試行フラグを初期化
+if "login_attempted" not in st.session_state:
+    st.session_state["login_attempted"] = False
 
 # authenticatorが初期化されているか確認
 if authenticator:
     
     # 初回実行時、または認証情報が存在しない場合にのみCookieをチェックする
-    # これにより、st.experimental_rerun()後の予期せぬエラーを防ぐ
     if st.session_state["authentication_status"] is None:
         try:
             # Cookieによる認証状態をチェック
@@ -91,10 +93,9 @@ if authenticator:
             st.session_state["username"] = username
 
         except Exception as e:
-            # cookie_handlerが失敗した場合（例：無効なCookie、Streamlitの再実行時の競合）
+            # cookie_handlerが失敗した場合
             st.sidebar.error("セッションの読み込みに失敗しました。再度ログインしてください。")
             print(f"Cookie Handler Error: {e}")
-            # 認証状態をFalseに設定し、ログインフォームを表示させる
             st.session_state["authentication_status"] = False
             st.session_state["name"] = None
             st.session_state["username"] = None
@@ -102,36 +103,46 @@ if authenticator:
 
     # 認証ステータスがNoneまたはFalseの場合、ログインフォームを表示
     if st.session_state["authentication_status"] in (None, False):
+        
         # ログインフォームを直接サイドバーにレンダリングする
         with st.sidebar:
             st.title("ログイン (安定版)")
             
-            # stauthのloginメソッドを直接呼び出す（Streamlitのネイティブフォームを使用しない方法に戻す）
-            # これがライブラリの本来の使い方であり、 location='sidebar' を明示する
-            # st.experimental_rerun() は stauth.login() 内部で処理されるため、カスタムフォームは不要
+            # stauth.login()を呼び出す
             try:
+                # 認証処理。stauth.login()は認証に成功すると自動でst.experimental_rerun()を呼び出す
                 name, authentication_status, username = authenticator.login(
                     "ログイン", 
                     "sidebar" # location='sidebar' を明示
                 )
                 
-                # stauth.login() は認証ステータスをセッションに設定するが、
-                # 念のため、結果をセッション状態に反映させる
+                # 認証結果をセッション状態に反映させる
                 st.session_state["authentication_status"] = authentication_status
                 st.session_state["name"] = name
                 st.session_state["username"] = username
-                
+                st.session_state["login_attempted"] = True
+
             except Exception as e:
                 # 認証中に発生しうる予期せぬエラー
-                # エラーが'Location must be one of...'であれば、それはStreamlitの実行タイミングの問題
+                # Locationエラーは、ここで捕捉されることが多い
                 st.error(f"認証処理中にエラーが発生しました: {e}")
+                # エラーが発生した場合、認証状態をNoneに戻すか、Falseにする
+                if "Location must be one of" in str(e):
+                     st.session_state["authentication_status"] = None
+                     st.session_state["login_attempted"] = False # 再試行を促す
+                
+                # st.experimental_rerun() # Locationエラー後の強制再実行は危険なため避ける
+                
 
-
-        # 認証後のメッセージ表示ロジック
+        # 認証後のメッセージ表示ロジックをメインパネルに表示
         if st.session_state["authentication_status"] is False:
             # 認証失敗時のエラーメッセージ
-            st.sidebar.error("ユーザー名またはパスワードが間違っています。")
+            # stauth.login()が自動でエラーメッセージ（'ユーザー名/パスワードが間違っています'）を出すはずだが、念のため
+            if st.session_state["login_attempted"]:
+                st.sidebar.error("ユーザー名またはパスワードが間違っています。")
             st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+            st.session_state["login_attempted"] = False # リセット
+            
         elif st.session_state["authentication_status"] is None:
             # 初回訪問時、またはログアウト後の情報メッセージ
             st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
