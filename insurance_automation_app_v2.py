@@ -116,7 +116,8 @@ if authenticator:
             if submitted:
                 # 認証処理
                 try:
-                    name, authentication_status, username = authenticator.authenticate(
+                    # ★修正箇所: authenticator.authenticate を authenticator.login に変更
+                    name, authentication_status, username = authenticator.login(
                         username_input, 
                         password_input, 
                     )
