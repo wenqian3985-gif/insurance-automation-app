@@ -83,21 +83,24 @@ if "login_attempted" not in st.session_state:
 if authenticator:
     
     # 1. Cookieによる認証状態をチェック (st.session_state["authentication_status"] が None の場合のみ)
-    if st.session_state["authentication_status"] is None:
-        try:
-            # Cookieによる認証状態をチェックし、セッションに反映
-            name, authentication_status, username = authenticator.cookie_handler()
-            st.session_state["authentication_status"] = authentication_status
-            st.session_state["name"] = name
-            st.session_state["username"] = username
+    # アプリ実行のたびにcookie_handlerを呼び出すことで、セッション状態を最新に保つ
+    try:
+        # Cookieによる認証状態をチェックし、セッションに反映
+        # 戻り値は (name, authentication_status, username)
+        name, authentication_status, username = authenticator.cookie_handler()
+        
+        # 認証状態の更新
+        st.session_state["authentication_status"] = authentication_status
+        st.session_state["name"] = name
+        st.session_state["username"] = username
 
-        except Exception as e:
-            # cookie_handlerが失敗した場合
-            st.sidebar.error("セッションの読み込みに失敗しました。再度ログインしてください。")
-            print(f"Cookie Handler Error: {e}")
-            st.session_state["authentication_status"] = False
-            st.session_state["name"] = None
-            st.session_state["username"] = None
+    except Exception as e:
+        # cookie_handlerが失敗した場合、ログアウト状態にして再ログインを促す
+        st.sidebar.error("セッションの読み込み中にエラーが発生しました。再度ログインしてください。")
+        print(f"Cookie Handler Error: {e}")
+        st.session_state["authentication_status"] = False
+        st.session_state["name"] = None
+        st.session_state["username"] = None
 
 
     # 2. 認証ステータスがNoneまたはFalseの場合、ログインフォームを表示
@@ -107,46 +110,29 @@ if authenticator:
         with st.sidebar:
             st.title("ログイン (安定版)")
             
-            # stauth.login()を呼び出す
+            # stauth.login()を呼び出す。結果はcookie_handlerで自動的に処理される
             try:
-                # 認証処理。location='sidebar' を明示
-                name, authentication_status, username = authenticator.login(
+                # 認証処理を実行。戻り値は無視し、cookie_handlerの結果を信頼する
+                authenticator.login(
                     "ログイン", 
                     "sidebar" 
                 )
                 
-                # 認証結果をセッション状態に反映させる
-                st.session_state["authentication_status"] = authentication_status
-                st.session_state["name"] = name
-                st.session_state["username"] = username
-                
-                # ログイン試行が成功/失敗にかかわらず実行されたことをマーク
+                # ログイン試行が成功/失敗にかかわらず実行されたことをマーク（フォームのレンダリングが完了したことを意味する）
                 st.session_state["login_attempted"] = True
 
             except Exception as e:
-                # Locationエラーやその他の認証処理中の例外をキャッチ
+                # 認証処理中の例外をキャッチ
                 error_message = str(e)
                 
                 # エラーメッセージをサイドバーに表示
-                st.sidebar.error(f"認証処理中にエラーが発生しました。再試行してください。")
-                
-                # 以前の st.experimental_rerun() を削除し、セッションリセットに留める。
-                # これにより、レンダリング競合による AttributeError を回避する。
-                # ユーザーは手動で再試行する必要がある。
-                
-                # 認証状態をリセット
-                st.session_state["authentication_status"] = None
-                st.session_state["login_attempted"] = False
-                st.session_state["name"] = None
-                st.session_state["username"] = None
-
-                # Locationエラーを検出した場合、ユーザーにブラウザリロードを促すメッセージを追加
-                if "Location must be one of" in error_message:
-                    st.sidebar.warning("認証フォームの再描画に問題が発生しました。ブラウザをリロードしてください。")
+                st.sidebar.error(f"認証フォームの表示中にエラーが発生しました。ブラウザをリロードしてください。")
+                print(f"Login Widget Error: {e}")
                 
         # 3. 認証後のメッセージ表示ロジック
         
         # ユーザーが認証に失敗した（False）かつ、ログインを試行した（login_attempted）場合
+        # stauth.login()は認証に失敗するとFalseを返すため、このチェックを行う
         if st.session_state["authentication_status"] is False:
             if st.session_state["login_attempted"]:
                 st.sidebar.error("ユーザー名またはパスワードが間違っています。")
