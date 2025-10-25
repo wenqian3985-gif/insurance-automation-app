@@ -124,26 +124,25 @@ if authenticator:
                 st.session_state["login_attempted"] = True
 
             except Exception as e:
-                # Locationエラーなどの例外をキャッチ
+                # Locationエラーやその他の認証処理中の例外をキャッチ
                 error_message = str(e)
                 
                 # エラーメッセージをサイドバーに表示
                 st.sidebar.error(f"認証処理中にエラーが発生しました。再試行してください。")
                 
-                # Locationエラーを検出した場合、認証をリセットして再試行を促す
-                if "Location must be one of" in error_message:
-                     # 認証状態をリセット
-                     st.session_state["authentication_status"] = None
-                     st.session_state["login_attempted"] = False
-                     
-                     # 強制的に再実行を遅延させてフォームの再描画を待つ
-                     time.sleep(0.5) 
-                     st.experimental_rerun() # 再実行を指示
+                # 以前の st.experimental_rerun() を削除し、セッションリセットに留める。
+                # これにより、レンダリング競合による AttributeError を回避する。
+                # ユーザーは手動で再試行する必要がある。
                 
-                # 念のため、認証失敗としてマーク
-                st.session_state["authentication_status"] = False
+                # 認証状態をリセット
+                st.session_state["authentication_status"] = None
+                st.session_state["login_attempted"] = False
                 st.session_state["name"] = None
                 st.session_state["username"] = None
+
+                # Locationエラーを検出した場合、ユーザーにブラウザリロードを促すメッセージを追加
+                if "Location must be one of" in error_message:
+                    st.sidebar.warning("認証フォームの再描画に問題が発生しました。ブラウザをリロードしてください。")
                 
         # 3. 認証後のメッセージ表示ロジック
         
