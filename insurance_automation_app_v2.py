@@ -95,6 +95,10 @@ if authenticator:
         st.session_state["authentication_status"] = authentication_status
         st.session_state["name"] = name
         st.session_state["username"] = username
+        
+        # 認証成功時はレンダリングエラーフラグをクリア
+        if authentication_status is True:
+            st.session_state["auth_render_error"] = False
 
     except Exception as e:
         # cookie_handlerが失敗した場合、エラーメッセージはコンソールに出力し、
@@ -135,6 +139,10 @@ if authenticator:
                 st.sidebar.error(f"認証フォームの表示中に致命的なエラーが発生しました。ブラウザをリロードしてください。")
                 print(f"Login Widget Rendering Error: {e}")
                 
+                # エラーが発生した場合、認証ステータスをNoneにリセットし、
+                # 後のロジックで「ユーザー名またはパスワード間違い」のメッセージが出ないようにする
+                st.session_state["authentication_status"] = None
+                
         # 3. 認証後のメッセージ表示ロジック
         
         # 致命的なレンダリングエラーが発生していない場合のみ、通常のメッセージを表示
@@ -150,7 +158,6 @@ if authenticator:
             # ログアウト直後、または初回訪問時（None）
             elif st.session_state["authentication_status"] is None:
                 # cookie_handlerがエラーを吐いた場合のサイドバー表示
-                # Note: last_errorは使用しないため、代わりに cookie_handlerのtry/exceptでFalseにリセットされたことを利用する
                 
                 st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
                 st.sidebar.info("ユーザー名とパスワードを入力してください。")
