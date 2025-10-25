@@ -7,9 +7,10 @@ import json
 import google.generativeai as genai
 from pdf2image import convert_from_bytes
 from PIL import Image
-import streamlit_authenticator as stauth
-from streamlit_authenticator import Hasher
+# import streamlit_authenticator as stauth  # 削除
+# from streamlit_authenticator import Hasher # 削除
 import time
+import hashlib # ハッシュ化のために追加
 
 # ======================
 # 環境設定・デザイン
@@ -24,13 +25,7 @@ html, body, [class*="css"] {
 }
 .main-header { font-size: 2.2rem; font-weight: 800; color: #1f77b4; text-align: center; margin-bottom: 1.5rem; }
 .section-header { font-size: 1.4rem; font-weight: bold; color: #2ca02c; margin-top: 1.5rem; margin-bottom: 0.8rem; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
-/* 強制リセットボタンのスタイル */
-.reset-button button { 
-    background-color: #ff4b4b !important;
-    border-color: #ff4b4b !important;
-    color: white !important;
-    font-weight: bold;
-}
+/* ログインボタンのスタイル */
 .stButton>button { border-radius: 8px; border: 1px solid #2ca02c; color: white; background-color: #2ca02c; }
 </style>
 """, unsafe_allow_html=True)
@@ -39,348 +34,290 @@ st.markdown('<div class="main-header">🏥 保険業務自動化アシスタン�
 
 
 # ======================
-# 認証設定の読み込みと初期化
-# ======================
-try:
-    # Secretsから認証設定を読み込む
-    if 'auth' not in st.secrets:
-        st.error("❌ Secretsに認証設定（[auth]セクション）が見つかりません。")
-        st.stop()
-        
-    config_auth = {
-        "credentials": {
-            "usernames": st.secrets["auth"]["credentials"]["usernames"]
-        },
-        "cookie": {
-            # Secretsから直接設定値を参照
-            "name": st.secrets["auth"]["cookie_name"],
-            "key": st.secrets["auth"]["cookie_key"],
-            "expiry_days": st.secrets["auth"]["expiry_days"],
-        },
-        "preauthorized": {"emails": []}
-    }
-    
-    # Authenticateオブジェクトの初期化
-    # 修正: セッションベースの認証に切り替えるため、'key'引数にセッションキーを指定
-    authenticator = stauth.Authenticate(
-        config_auth["credentials"],
-        config_auth["cookie"]["name"],
-        config_auth["cookie"]["key"],
-        config_auth["cookie"]["expiry_days"],
-        key='streamlit_auth_session_key_v2' # 認証情報をセッション状態に保存する
-    )
-    print("Authentication initialized successfully.")
-
-except Exception as e:
-    # 認証初期化失敗時の詳細なログを出力
-    print(f"Authentication Initialization Failed: {e}")
-    st.error(f"ログイン画面の初期化に失敗しました。Secretsの設定を確認してください。エラー: {e}")
-    authenticator = None 
-    st.stop() 
-
-
-# ======================
-# ログインフォームと認証
+# ネイティブ認証ロジック
 # ======================
 
 # セッション状態の初期化
 if "authentication_status" not in st.session_state:
     st.session_state["authentication_status"] = None
+if "name" not in st.session_state:
+    st.session_state["name"] = None
+
+def hash_password(password):
+    """パスワードをSHA256でハッシュ化する"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def load_secrets_users():
+    """st.secretsからユーザー認証情報を読み込む"""
+    try:
+        secrets_users = {}
+        # st.secrets['auth_users']が存在するか確認
+        if "auth_users" in st.secrets:
+            for username, user_data in st.secrets["auth_users"].items():
+                # ユーザーデータが存在し、必須フィールドが含まれているかチェック
+                if user_data.get("name") and user_data.get("password_hash"):
+                    secrets_users[username] = {
+                        "name": user_data["name"],
+                        "password_hash": user_data["password_hash"]
+                    }
+        
+        if not secrets_users:
+            # ユーザー情報がない場合は致命的なエラー
+            st.error("❌ 認証情報 (st.secrets の [auth_users] セクション) が見つかりません。Secretsファイルを確認してください。")
+            st.stop()
+            
+        return secrets_users
+        
+    except Exception as e:
+        st.error(f"❌ 認証情報の読み込み中に致命的なエラーが発生しました: {e}")
+        st.stop()
+
+# Secretsからユーザーデータをロード (アプリケーション起動時に一度だけ実行される)
+AUTHENTICATION_USERS = load_secrets_users()
+
+
+def authenticate_user(username, password):
+    """ユーザー名とパスワードを検証する"""
+    # HARDCODED_USERS を AUTHENTICATION_USERS に置き換え
+    if username in AUTHENTICATION_USERS:
+        # 入力パスワードをハッシュ化
+        input_hash = hash_password(password)
+        # 保存されているハッシュと比較
+        if input_hash == AUTHENTICATION_USERS[username]["password_hash"]:
+            st.session_state["authentication_status"] = True
+            st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
+            st.session_state["username"] = username
+            return True
+    
+    st.session_state["authentication_status"] = False
     st.session_state["name"] = None
     st.session_state["username"] = None
-if "auth_render_error" not in st.session_state:
-    st.session_state["auth_render_error"] = False
+    return False
 
-# 1. Cookie/Session Handlerによる認証状態のチェック (常に最初に行う)
-# 認証状態をセッションに反映させ、再実行時に状態を保持させる
-if authenticator:
-    try:
-        # cookie_handlerがセッションキーに基づいて状態を読み込む
-        name, authentication_status, username = authenticator.cookie_handler()
-        
-        st.session_state["authentication_status"] = authentication_status
-        st.session_state["name"] = name
-        st.session_state["username"] = username
-        
-        if authentication_status is True:
-            st.session_state["auth_render_error"] = False
-
-    except Exception as e:
-        # cookie_handler自体でエラーが発生した場合、認証をリセット
-        print(f"Cookie/Session Handler Error: {e}")
-        st.session_state["authentication_status"] = False
-        st.session_state["name"] = None
-        st.session_state["username"] = None
-        # このエラーは致命的ではないため auth_render_error は立てない
-
-
-# authenticatorが初期化されているか確認
-if authenticator:
+def logout():
+    """ログアウト処理"""
+    st.session_state["authentication_status"] = None
+    st.session_state["name"] = None
+    st.session_state["username"] = None
+    st.info("ログアウトしました。")
+    time.sleep(1)
+    st.rerun()
     
-    # 強制リセット関数を authenticator が存在するスコープ内に定義
-    def force_session_reset():
-        """セッション状態と認証キーをクリアし、強制的に再実行する"""
-        try:
-            # 認証セッションキーをクリア (これにより認証状態がリセットされる)
-            if 'streamlit_auth_session_key_v2' in st.session_state:
-                del st.session_state['streamlit_auth_session_key_v2']
+# ======================
+# ログインフォーム表示
+# ======================
 
-            # 2. セッション状態をクリア
-            st.session_state["authentication_status"] = None
-            st.session_state["name"] = None
-            st.session_state["username"] = None
-            st.session_state["auth_render_error"] = False
-            
-            st.success("セッションと認証状態をリセットしました。アプリケーションが再起動します。")
-            time.sleep(1) # メッセージ表示のための短い待機
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"リセット中にエラーが発生しました: {e}。手動でブラウザのCookieを削除してください。")
-            st.stop()
-
-
-    # 致命的なレンダリングエラー発生時の処理
-    if st.session_state["auth_render_error"]:
-        st.error("❌ 認証フォームのレンダリング中に致命的なエラーが検出されました。")
-        st.warning("この問題は、Streamlitのセッション状態またはブラウザの認証クッキーが不安定になっていることが原因である可能性があります。")
-        st.info("通常の解決策（リロード、キャッシュクリア）で解決しない場合は、以下の**最終手段**をお試しください。")
+if st.session_state["authentication_status"] is not True:
+    with st.sidebar:
+        st.title("ログイン")
         
-        # 最終手段として、強制リセットボタンを表示
-        st.markdown('<div class="reset-button">', unsafe_allow_html=True)
-        if st.button("🔴 セッションとクッキーを強制リセット (最終手段)", on_click=force_session_reset):
-             pass # on_clickで処理が実行される
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        st.stop() # 処理を停止
-
-
-    # 2. 認証ステータスがNoneまたはFalseの場合、ログインフォームを表示
-    # 認証がまだ完了していない場合のみログインウィジェットをレンダリングする
-    if st.session_state["authentication_status"] in (None, False):
-        with st.sidebar:
-            st.title("ログイン")
-            
-            # 認証フォームのレンダリング
-            try:
-                # 認証処理を行う
-                name, authentication_status, username = authenticator.login(
-                    "ログイン", 
-                    "sidebar" 
-                )
-                
-                # 認証結果をセッション状態に反映させる
-                st.session_state["authentication_status"] = authentication_status
-                st.session_state["name"] = name
-                st.session_state["username"] = username
-                
-                st.session_state["auth_render_error"] = False # エラーは発生しなかった
-                st.rerun() # 認証状態が変わった場合は再実行
-
-            except Exception as e:
-                # 致命的なレンダリングエラーをキャッチした場合はフラグを立てて停止
-                st.session_state["auth_render_error"] = True 
-                print(f"Login Widget Rendering Error: {e}")
-                st.session_state["authentication_status"] = None
-                
-                # エラーフラグを立てた後、メイン処理 L135 の st.stop() に処理を移す
+        # ログインフォーム
+        username_input = st.text_input("ユーザー名")
+        password_input = st.text_input("パスワード", type="password")
+        
+        if st.button("ログイン"):
+            if authenticate_user(username_input, password_input):
+                st.success("ログイン成功！")
                 st.rerun()
-                
-        # 3. 認証後のメッセージ表示ロジック
-        if st.session_state["authentication_status"] is False:
-            st.sidebar.error("ユーザー名またはパスワードが間違っているか、セッションが期限切れです。")
-            st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-            
-        elif st.session_state["authentication_status"] is None:
-            st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
-            st.sidebar.info("ユーザー名とパスワードを入力してください。")
-
-
-    
-    # 4. メインコンテンツの表示 (認証成功時)
-    if st.session_state["authentication_status"]:
-        st.sidebar.success(f"ようこそ、{st.session_state['name']}さん！")
-        authenticator.logout("ログアウト", "sidebar") # ログアウトボタンはサイドバーへ配置
-
-        st.markdown("---")
-        st.subheader("📄 保険自動化システム メイン機能")
-
-        # ======================
-        # GEMINI 初期化
-        # ======================
-        try:
-            GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-2.5-flash")
-        except KeyError:
-            st.error("❌ GEMINI_API_KEY が設定されていません。Secretsに追加してください。")
-            st.stop()
-
-
-        # ======================
-        # PDF抽出関数 (堅牢性向上)
-        # ======================
-        @st.cache_data
-        def extract_text_from_pdf(pdf_bytes):
-            """PDFからテキスト抽出"""
-            try:
-                reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
-                text = "\n\n".join([p.extract_text() or "" for p in reader.pages])
-                return text.strip()
-            except Exception as e:
-                print(f"PDFテキスト抽出エラー（PyPDF2）: {e}")
-                return ""
-
-        @st.cache_data
-        def convert_pdf_to_images(pdf_bytes):
-            """PDFを画像に変換"""
-            return convert_from_bytes(pdf_bytes)
-
-        # Gemini APIで情報抽出（キャッシュなし）
-        def extract_info_with_gemini(pdf_bytes, fields, pdf_name):
-            """Gemini APIで情報抽出"""
-            
-            with st.spinner(f"[{pdf_name}] Geminiによる情報抽出中..."):
-                text = extract_text_from_pdf(pdf_bytes)
-                example_json = {f: "" for f in fields}
-
-                prompt = (
-                    f"以下の保険見積書（またはその画像）から、指定されたすべての項目を抽出出し、"
-                    f"**必ず**JSON形式で返してください。不明な項目は空文字にしてください。\n"
-                    f"抽出項目リスト: {', '.join(fields)}\n"
-                    f"JSON形式の例: {json.dumps(example_json, ensure_ascii=False)}"
-                )
-
-                contents = [{"text": prompt}]
-                
-                if text and len(text) > 100:
-                    contents.append({"text": f"--- PDF TEXT START ---\n{text}"})
-                else:
-                    st.warning(f"[{pdf_name}] テキスト抽出が不十分なため、画像として処理します。")
-                    try:
-                        images = convert_pdf_to_images(pdf_bytes)
-                        for i, img in enumerate(images[:5]):
-                             contents.append(img)
-                             if i >= 2: break
-                    except Exception as img_e:
-                        st.error(f"[{pdf.name}] 画像変換に失敗しました: {img_e}")
-                        return None
-
-                try:
-                    response = model.generate_content(contents)
-
-                    if not response or not response.text:
-                        raise ValueError("Geminiの応答が空です。")
-
-                    clean_text = response.text.strip()
-                    if clean_text.startswith("```"):
-                        clean_text = clean_text.replace("```json", "").replace("```", "").strip()
-                    
-                    return json.loads(clean_text)
-                except json.JSONDecodeError:
-                    st.error(f"[{pdf.name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...")
-                    return None
-                except Exception as e:
-                    st.error(f"[{pdf.name}] Gemini API呼び出しエラー: {e}")
-                    return None
-
-        # ======================
-        # アプリ本体
-        # ======================
-        
-        if "fields" not in st.session_state:
-            st.session_state["fields"] = ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
-        if "customer_df" not in st.session_state:
-            st.session_state["customer_df"] = pd.DataFrame()
-        if "comparison_df" not in st.session_state:
-            st.session_state["comparison_df"] = pd.DataFrame()
-
-
-        st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード (任意)</div>', unsafe_allow_html=True)
-        customer_file = st.file_uploader("顧客情報.xlsx をアップロード", type=["xlsx"], key="customer_uploader")
-        
-        if customer_file:
-            try:
-                df_customer = pd.read_excel(customer_file)
-                new_fields = df_customer.columns.tolist()
-                st.session_state["fields"] = new_fields
-                st.session_state["customer_df"] = df_customer 
-                
-                st.success("✅ 顧客情報ファイルを読み込み、列名を抽出フィールドとして設定しました。")
-                st.dataframe(df_customer, use_container_width=True)
-
-            except Exception as e:
-                st.error(f"Excelファイルの読み込みエラー: {e}")
-                st.session_state["fields"] = ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
-                st.session_state["customer_df"] = pd.DataFrame()
-                
-        st.info(f"現在の抽出フィールド: {', '.join(st.session_state['fields'])}")
-
-
-        st.markdown('<div class="section-header">📄 2. 見積書PDFから情報抽出</div>', unsafe_allow_html=True)
-        uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True, key="pdf_uploader")
-        
-        if uploaded_pdfs and st.button("PDFから情報を抽出", key="extract_button"):
-            results = []
-            fields = st.session_state["fields"]
-
-            progress_bar = st.progress(0)
-            total_pdfs = len(uploaded_pdfs)
-
-            for i, pdf in enumerate(uploaded_pdfs):
-                try:
-                    pdf_bytes = pdf.read()
-                    data = extract_info_with_gemini(pdf_bytes, fields, pdf.name)
-                    
-                    if data:
-                        data["ファイル名"] = pdf.name
-                        cleaned_data = {k: v for k, v in data.items() if k in fields or k == "ファイル名"}
-                        results.append(cleaned_data)
-                        st.success(f"✅ {pdf.name} 抽出成功")
-                    else:
-                        st.warning(f"⚠️ {pdf.name} は抽出に失敗したか、無効な結果を返しました。")
-                        
-                except Exception as e:
-                    st.error(f"❌ {pdf.name} 処理中に予期せぬエラー: {str(e)}")
-                
-                progress_bar.progress((i + 1) / total_pdfs)
-            
-            progress_bar.empty()
-
-            if results:
-                df = pd.DataFrame(results)
-                column_order = [f for f in fields if f in df.columns] + ["ファイル名"]
-                df = df.reindex(columns=column_order)
-                
-                st.session_state["comparison_df"] = df
-                st.dataframe(df, use_container_width=True)
             else:
-                st.warning("PDFから情報を抽出できませんでした。処理ログを確認してください。")
+                st.error("ユーザー名またはパスワードが間違っています。")
+        
+        # 認証情報がSecretsから読み込まれていることを明示
+        st.info("認証情報はst.secretsの[auth_users]セクションから読み込まれています。")
+        st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+else:
+    # ログイン成功時のサイドバー表示
+    with st.sidebar:
+        st.success(f"ようこそ、{st.session_state['name']}さん！")
+        if st.button("ログアウト"):
+            logout()
 
-        st.markdown('<div class="section-header">📊 3. 抽出結果をダウンロード</div>', unsafe_allow_html=True)
-        if not st.session_state["comparison_df"].empty:
-            @st.cache_data
-            def to_excel_bytes(df):
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    df.to_excel(writer, index=False, sheet_name="見積情報比較表")
-                return output.getvalue()
+# ======================
+# メインコンテンツの表示 (認証成功時)
+# ======================
+if st.session_state["authentication_status"]:
 
-            excel_data = to_excel_bytes(st.session_state["comparison_df"])
-            
-            st.download_button(
-                "📥 Excelでダウンロード",
-                data=excel_data,
-                file_name="見積情報比較表_抽出結果.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    st.markdown("---")
+    st.subheader("📄 保険自動化システム メイン機能")
+
+    # ======================
+    # GEMINI 初期化
+    # ======================
+    try:
+        # Secretsのキーチェックを維持
+        if 'GEMINI_API_KEY' not in st.secrets:
+             st.error("❌ GEMINI_API_KEY が設定されていません。Secretsに追加してください。")
+             st.stop()
+             
+        GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.5-flash")
+    except KeyError:
+        st.error("❌ GEMINI_API_KEY が設定されていません。Secretsに追加してください。")
+        st.stop()
+
+
+    # ======================
+    # PDF抽出関数 (堅牢性向上)
+    # ======================
+    @st.cache_data
+    def extract_text_from_pdf(pdf_bytes):
+        """PDFからテキスト抽出"""
+        try:
+            reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+            text = "\n\n".join([p.extract_text() or "" for p in reader.pages])
+            return text.strip()
+        except Exception as e:
+            print(f"PDFテキスト抽出エラー（PyPDF2）: {e}")
+            return ""
+
+    @st.cache_data
+    def convert_pdf_to_images(pdf_bytes):
+        """PDFを画像に変換"""
+        return convert_from_bytes(pdf_bytes)
+
+    # Gemini APIで情報抽出（キャッシュなし）
+    def extract_info_with_gemini(pdf_bytes, fields, pdf_name):
+        """Gemini APIで情報抽出"""
+        
+        with st.spinner(f"[{pdf_name}] Geminiによる情報抽出中..."):
+            text = extract_text_from_pdf(pdf_bytes)
+            example_json = {f: "" for f in fields}
+
+            prompt = (
+                f"以下の保険見積書（またはその画像）から、指定されたすべての項目を抽出出し、"
+                f"**必ず**JSON形式で返してください。不明な項目は空文字にしてください。\n"
+                f"抽出項目リスト: {', '.join(fields)}\n"
+                f"JSON形式の例: {json.dumps(example_json, ensure_ascii=False, ensure_ascii=False)}"
             )
-        else:
-            st.info("まだ抽出結果はありません。")
 
-        st.markdown("---")
-        st.markdown("**保険業務自動化アシスタント** | Secure Login + Gemini 2.5 Flash + Streamlit")
+            contents = [{"text": prompt}]
+            
+            if text and len(text) > 100:
+                contents.append({"text": f"--- PDF TEXT START ---\n{text}"})
+            else:
+                st.warning(f"[{pdf_name}] テキスト抽出が不十分なため、画像として処理します。")
+                try:
+                    images = convert_from_bytes(pdf_bytes)
+                    for i, img in enumerate(images[:5]):
+                            contents.append(img)
+                            if i >= 2: break
+                except Exception as img_e:
+                    st.error(f"[{pdf_name}] 画像変換に失敗しました: {img_e}")
+                    return None
+
+            try:
+                response = model.generate_content(contents)
+
+                if not response or not response.text:
+                    raise ValueError("Geminiの応答が空です。")
+
+                clean_text = response.text.strip()
+                if clean_text.startswith("```"):
+                    clean_text = clean_text.replace("```json", "").replace("```", "").strip()
+                
+                return json.loads(clean_text)
+            except json.JSONDecodeError:
+                # エラーメッセージを分かりやすく修正
+                st.error(f"[{pdf_name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...")
+                return None
+            except Exception as e:
+                st.error(f"[{pdf_name}] Gemini API呼び出しエラー: {e}")
+                return None
+
+    # ======================
+    # アプリ本体
+    # ======================
     
-# 認証オブジェクトが初期化されていない場合は、エラーメッセージを表示したまま停止
-elif not authenticator:
-    st.error("❌ 認証設定のロードに失敗しました。アプリケーションを起動できません。")
-    st.stop()
+    if "fields" not in st.session_state:
+        st.session_state["fields"] = ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
+    if "customer_df" not in st.session_state:
+        st.session_state["customer_df"] = pd.DataFrame()
+    if "comparison_df" not in st.session_state:
+        st.session_state["comparison_df"] = pd.DataFrame()
+
+
+    st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード (任意)</div>', unsafe_allow_html=True)
+    customer_file = st.file_uploader("顧客情報.xlsx をアップロード", type=["xlsx"], key="customer_uploader")
+    
+    if customer_file:
+        try:
+            df_customer = pd.read_excel(customer_file)
+            new_fields = df_customer.columns.tolist()
+            st.session_state["fields"] = new_fields
+            st.session_state["customer_df"] = df_customer 
+            
+            st.success("✅ 顧客情報ファイルを読み込み、列名を抽出フィールドとして設定しました。")
+            st.dataframe(df_customer, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Excelファイルの読み込みエラー: {e}")
+            st.session_state["fields"] = ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
+            st.session_state["customer_df"] = pd.DataFrame()
+            
+    st.info(f"現在の抽出フィールド: {', '.join(st.session_state['fields'])}")
+
+
+    st.markdown('<div class="section-header">📄 2. 見積書PDFから情報抽出</div>', unsafe_allow_html=True)
+    uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True, key="pdf_uploader")
+    
+    if uploaded_pdfs and st.button("PDFから情報を抽出", key="extract_button"):
+        results = []
+        fields = st.session_state["fields"]
+
+        progress_bar = st.progress(0)
+        total_pdfs = len(uploaded_pdfs)
+
+        for i, pdf in enumerate(uploaded_pdfs):
+            try:
+                pdf_bytes = pdf.read()
+                data = extract_info_with_gemini(pdf_bytes, fields, pdf.name)
+                
+                if data:
+                    data["ファイル名"] = pdf.name
+                    cleaned_data = {k: v for k, v in data.items() if k in fields or k == "ファイル名"}
+                    results.append(cleaned_data)
+                    st.success(f"✅ {pdf.name} 抽出成功")
+                else:
+                    st.warning(f"⚠️ {pdf.name} は抽出に失敗したか、無効な結果を返しました。")
+                    
+            except Exception as e:
+                st.error(f"❌ {pdf.name} 処理中に予期せぬエラー: {str(e)}")
+            
+            progress_bar.progress((i + 1) / total_pdfs)
+        
+        progress_bar.empty()
+
+        if results:
+            df = pd.DataFrame(results)
+            column_order = [f for f in fields if f in df.columns] + ["ファイル名"]
+            df = df.reindex(columns=column_order)
+            
+            st.session_state["comparison_df"] = df
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.warning("PDFから情報を抽出できませんでした。処理ログを確認してください。")
+
+    st.markdown('<div class="section-header">📊 3. 抽出結果をダウンロード</div>', unsafe_allow_html=True)
+    if not st.session_state["comparison_df"].empty:
+        @st.cache_data
+        def to_excel_bytes(df):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df.to_excel(writer, index=False, sheet_name="見積情報比較表")
+            return output.getvalue()
+
+        excel_data = to_excel_bytes(st.session_state["comparison_df"])
+        
+        st.download_button(
+            "📥 Excelでダウンロード",
+            data=excel_data,
+            file_name="見積情報比較表_抽出結果.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    else:
+        st.info("まだ抽出結果はありません。")
+
+    st.markdown("---")
+    st.markdown("**保険業務自動化アシスタント** | Native Login + Gemini 2.5 Flash + Streamlit")
+    
