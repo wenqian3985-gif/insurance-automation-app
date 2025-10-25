@@ -116,11 +116,11 @@ if authenticator:
             if submitted:
                 # 認証処理
                 try:
-                    # ★修正箇所: loginメソッドにlocation='sidebar'を追加
+                    # ★修正箇所: location='sidebar'を削除。Streamlitのカスタムフォーム内では不要。
                     name, authentication_status, username = authenticator.login(
                         username_input, 
                         password_input, 
-                        location='sidebar'
+                        # location='sidebar' <-- この引数を削除
                     )
                     
                     # 認証結果をセッション状態に保存し、Streamlitの再実行を促す
