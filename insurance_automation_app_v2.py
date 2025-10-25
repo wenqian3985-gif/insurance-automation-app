@@ -73,14 +73,32 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
-    # 【修正】Streamlitの重複フォームキーエラー(StreamlitAPIException)を避けるため、
-    # 複数回 authenticator.login() を呼び出すロバストロジックを削除し、
-    # 単一の、最も一般的な3つの戻り値でアンパックを試みます。
+    name, authentication_status, username = None, None, None
+    
+    # 【修正】authenticator.login()の戻り値がNoneである可能性に対応
+    # TypeError: cannot unpack non-iterable NoneType object を回避する
     try:
-        name, authentication_status, username = authenticator.login(
+        login_result = authenticator.login(
             fields={'Form name': 'ログイン'},
             location='main'
         )
+
+        if login_result is not None:
+            # 戻り値がNoneでなければ、安全にアンパックを試みる
+            # 多くの環境で3つの戻り値を返すため、3値で試行。数が合わなければ再度TypeErrorが発生するが、
+            # StreamlitAPIException回避のため、複数呼び出しは避ける
+            if len(login_result) == 3:
+                 name, authentication_status, username = login_result
+            elif len(login_result) == 4:
+                 # 4つの戻り値に対応する環境向け
+                 name, authentication_status, username, _ = login_result
+            else:
+                 st.error(f"認証オブジェクトが予期しない数の戻り値 ({len(login_result)}個) を返しました。")
+                 authentication_status = None
+        else:
+            # login_result が None の場合 (初期表示時など)
+            authentication_status = None
+
     except Exception as e:
         # TypeError (戻り値の数が合わない) やその他の予期せぬエラーが発生した場合の安全策
         st.error(f"認証フォームの表示中にエラーが発生しました。({type(e).__name__}: {e})")
