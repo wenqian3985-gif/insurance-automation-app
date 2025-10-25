@@ -35,7 +35,6 @@ st.markdown('<div class="main-header">🏥 保険業務自動化アシスタン�
 # ======================
 try:
     # Secretsから認証設定を読み込む
-    # Streamlit Cloudでの標準的なSecrets管理方法を採用
     if 'auth' not in st.secrets:
         st.error("❌ Secretsに認証設定（[auth]セクション）が見つかりません。")
         st.stop()
@@ -49,7 +48,7 @@ try:
             "key": st.secrets["auth"]["cookie_key"],
             "expiry_days": st.secrets["auth"]["expiry_days"],
         },
-        "preauthorized": {"emails": []} # preauthorizedは空でOK
+        "preauthorized": {"emails": []}
     }
 
     # Authenticateオブジェクトの初期化
@@ -58,12 +57,10 @@ try:
         config_auth["cookie"]["name"],
         config_auth["cookie"]["key"],
         config_auth["cookie"]["expiry_days"],
-        # ロードエラー回避のため、force_update=Trueを追加し、コンポーネントのフォールバックを有効化
         force_update=True
     )
 except Exception as e:
     st.error(f"ログイン画面の初期化に失敗しました。Secretsの設定を確認してください。エラー: {e}")
-    # st.stop() は、エラー発生時に再実行を妨げ、デバッグを難しくするため、ここでは使用しない
     authenticator = None 
 
 
@@ -74,32 +71,40 @@ except Exception as e:
 # authenticatorが初期化されているか確認
 if authenticator:
     
-    # 【最終修正】TypeError（NoneType object）とValueError（アンパック失敗）の両方を捕捉し、
-    # ログインフォームの安定性と応答性を確保します。
-    name, authentication_status, username = None, None, None
-    try:
-        # 認証フォームを表示し、結果を変数に格納 (3つの戻り値を期待)
-        name, authentication_status, username = authenticator.login(
-            fields={'Form name': 'ログイン'},
-            location='main'
-        )
-    except (ValueError, TypeError):
-        # 戻り値の数が合わない（ValueError）か、Noneが返された場合（TypeError）を捕捉し、無視
-        pass
-    except Exception as e:
-        # その他の予期せぬエラー
-        st.error(f"認証フォームの表示中に予期せぬエラーが発生しました。({type(e).__name__}: {e})")
-        
-    # 認証ステータスに応じた処理
-    if authentication_status is False:
-        st.error("ユーザー名またはパスワードが間違っています。")
-    elif authentication_status is None:
-        st.info("ユーザー名とパスワードを入力してください。")
+    # 【最重要：認証ロジックの再構築】
+    # サイドバーに認証フォームを配置し、認証が完了するまでメインコンテンツを描画しません。
+    # 複数の例外（TypeError/ValueError）に対応することで堅牢性を確保します。
     
-    # ログイン成功後の画面
+    name, authentication_status, username = None, None, None
+    
+    # 認証フォームをサイドバーに配置
+    with st.sidebar:
+        st.title("ログイン")
+        try:
+            # 認証フォームを表示し、結果を変数に格納 (3つの戻り値を期待)
+            name, authentication_status, username = authenticator.login(
+                fields={'Form name': '認証'},
+                location='sidebar' 
+            )
+        except (ValueError, TypeError):
+            # 戻り値の数が合わないか、Noneが返された場合を捕捉
+            pass
+        except Exception as e:
+            # その他の予期せぬエラー
+            st.error(f"認証フォームの表示中に予期せぬエラーが発生しました。({type(e).__name__}: {e})")
+
+    # メインコンテンツでのステータス表示
+    if authentication_status is False:
+        st.sidebar.error("ユーザー名またはパスワードが間違っています。")
+        st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。サイドバーからログインしてください。")
+    elif authentication_status is None:
+        st.sidebar.info("ユーザー名とパスワードを入力してください。")
+        st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。サイドバーからログインしてください。")
+    
+    # ログイン成功後の画面 (メインコンテンツ)
     if authentication_status:
-        st.success(f"ようこそ、{name}さん！")
-        authenticator.logout("ログアウト", "sidebar") # ログアウトボタンはサイドバーへ移動
+        st.sidebar.success(f"ようこそ、{name}さん！")
+        authenticator.logout("ログアウト", "sidebar") # ログアウトボタンはサイドバーへ配置
 
         st.markdown("---")
         st.subheader("📄 保険自動化システム メイン機能")
