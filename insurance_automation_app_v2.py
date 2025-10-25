@@ -73,28 +73,21 @@ except Exception as e:
 
 # authenticatorが初期化されているか確認
 if authenticator:
-    # 【ロバスト認証ロジック】TypeError回避のため、戻り値の数を try/except で吸収します。
-    # Streamlit Authenticator はバージョンや環境によって戻り値の数が 3つ または 4つ と変化します。
+    # 【修正】Streamlitの重複フォームキーエラー(StreamlitAPIException)を避けるため、
+    # 複数回 authenticator.login() を呼び出すロバストロジックを削除し、
+    # 単一の、最も一般的な3つの戻り値でアンパックを試みます。
     try:
-        # 1. 最初に最も一般的な3つの戻り値でアンパックを試みる (旧バージョン/一般的な挙動)
         name, authentication_status, username = authenticator.login(
             fields={'Form name': 'ログイン'},
             location='main'
         )
-    except TypeError:
-        # 2. 失敗した場合、4つの戻り値で再試行する (最新バージョンまたは互換性モード)
-        # 4つ目の戻り値 (キーなど) は無視するために `_` を使用します。
-        try:
-            name, authentication_status, username, _ = authenticator.login(
-                fields={'Form name': 'ログイン'},
-                location='main'
-            )
-        except TypeError as e_final:
-            # 3. 4つでも失敗した場合、致命的なエラーとして処理を停止
-            st.error(f"致命的な認証エラー: authenticator.login()の戻り値の数が予期されていません。({e_final})")
-            authentication_status = None # ステータスをNoneに設定し、ログイン後の処理に進まないようにする
-            name = None
-            username = None
+    except Exception as e:
+        # TypeError (戻り値の数が合わない) やその他の予期せぬエラーが発生した場合の安全策
+        st.error(f"認証フォームの表示中にエラーが発生しました。({type(e).__name__}: {e})")
+        # 認証失敗として扱い、メインロジックに進まないようにする
+        authentication_status = None
+        name = None
+        username = None
 
 
     # 認証ステータスに応じた処理
