@@ -78,16 +78,25 @@ if "authentication_status" not in st.session_state:
 # authenticatorが初期化されているか確認
 if authenticator:
     
-    # 既存の認証状態（Cookieによるログイン）をチェック
-    name, authentication_status, username = authenticator.cookie_handler()
-
+    # 既存の認証状態（Cookieによるログイン）をチェック - クラッシュ対策としてtry-exceptを追加
+    name, authentication_status, username = None, None, None
+    try:
+        name, authentication_status, username = authenticator.cookie_handler()
+    except Exception as e:
+        # cookie_handlerが失敗した場合、認証状態をリセット
+        st.sidebar.error("セッションの読み込みに失敗しました。再度ログインしてください。")
+        print(f"Cookie Handler Error: {e}")
+        authentication_status = False # ログインフォームを強制的に表示
+        name = None
+        username = None
+    
     # 認証情報をセッション状態に設定
     st.session_state["authentication_status"] = authentication_status
     st.session_state["name"] = name
     st.session_state["username"] = username
 
     # Streamlitネイティブのformを使用して、ログインボタンのクリックイベントを強制的に有効にする
-    if authentication_status is None or authentication_status is False:
+    if st.session_state["authentication_status"] is None or st.session_state["authentication_status"] is False:
         with st.sidebar:
             st.title("ログイン (安定版)")
             
@@ -349,4 +358,5 @@ if authenticator:
     
 # 認証オブジェクトが初期化されていない場合は、エラーメッセージを表示したまま停止
 elif not authenticator:
-    st.info("認証設定のロードに失敗しました。アプリケーションを起動できません。")
+    st.error("❌ 認証設定のロードに失敗しました。アプリケーションを起動できません。")
+    st.stop()
