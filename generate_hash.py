@@ -105,7 +105,7 @@ def load_secrets_users():
         
 # Secretsからユーザーデータをロード (アプリケーション起動時に一度だけ実行される)
 AUTHENTICATION_USERS = load_secrets_users()
-
+# 強制リロード用コメント
 
 def authenticate_user(username, password):
     """ユーザー名とパスワードを検証する"""
