@@ -8,7 +8,7 @@ import google.generativeai as genai
 from pdf2image import convert_from_bytes
 from PIL import Image
 # import streamlit_authenticator as stauth  # 削除
-# from streamlit_authenticator import Hasher # 削除
+# import streamlit_authenticator as stauth  # 削除
 import time
 import hashlib # ハッシュ化のために追加
 
@@ -48,40 +48,60 @@ def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def load_secrets_users():
-    """st.secretsからユーザー認証情報を読み込み、UIにデバッグ情報を表示する"""
+    """st.secretsからユーザー認証情報を読み込み、Secretsが失敗した場合はハードコードを使用する"""
     secrets_users = {}
     debug_info = {} # デバッグ表示用
     
+    # === STEP 1: Secretsからの読み込みを試行 ===
     try:
-        # st.secrets['auth_users']が存在するか確認
-        if "auth_users" in st.secrets:
-            # Secretsからデータをロード
-            for username, user_data in st.secrets["auth_users"].items():
-                if user_data.get("name") and user_data.get("password_hash"):
-                    secrets_users[username] = {
-                        "name": user_data["name"],
-                        "password_hash": user_data["password_hash"]
-                    }
-                    debug_info[username] = user_data["name"]
+        # フラットキー (例: AUTH_USER_1_USERNAME, AUTH_USER_1_HASH) を探索
+        # 最大10ユーザーまでチェック
+        for i in range(1, 11):
+            username_key = f"AUTH_USER_{i}_USERNAME"
+            name_key = f"AUTH_USER_{i}_NAME"
+            hash_key = f"AUTH_USER_{i}_HASH"
+
+            # 3つのキーが全て存在する場合のみユーザーとしてロード
+            if username_key in st.secrets and name_key in st.secrets and hash_key in st.secrets:
+                username = st.secrets[username_key]
+                name = st.secrets[name_key]
+                password_hash = st.secrets[hash_key]
+                
+                # ユーザー名をキーとして辞書を構築
+                secrets_users[username] = {
+                    "name": name,
+                    "password_hash": password_hash
+                }
+                debug_info[username] = name
         
-        # --- ログ代替表示 (デバッグ用) ---
-        if not debug_info:
-            st.warning("⚠️ デバッグ情報: Secretsの [auth_users] セクションが見つかりませんでした。")
-        else:
+        # Secretsが成功した場合
+        if debug_info:
             st.info(f"✅ デバッグ情報: Secretsから以下のユーザー名がロードされました: {', '.join(debug_info.keys())}")
-            # st.json(debug_info) # 必要なら詳細な情報を表示
-
-        if not secrets_users:
-            # ユーザー情報がない場合は致命的なエラー (APIキーエラーと区別するため、ここではst.stop()を削除して後続のエラーに任せる)
-            # st.error("❌ 認証情報 (st.secrets の [auth_users] セクション) が見つかりません。Secretsファイルを確認してください。")
-            # st.stop()
-            pass # ログ表示後は継続
-
-        return secrets_users
-        
+            return secrets_users
+            
     except Exception as e:
-        st.error(f"❌ 認証情報の読み込み中に致命的なエラーが発生しました。SecretsのToml形式を確認してください: {e}")
-        st.stop()
+        # Secrets読み込み中の例外処理
+        st.warning(f"⚠️ Secrets読み込み中にエラーが発生しました: {e}")
+        pass # エラーが発生しても、次のステップ（ハードコード）に進む
+
+    # === STEP 2: Secretsが失敗した場合、ハードコードされたユーザー情報を使用 (緊急デバッグ措置) ===
+    st.error("🚨 緊急デバッグモード: Secretsからのユーザー情報ロードに失敗したため、コード内のハードコードされた認証情報を使用します。")
+    st.warning("⚠️ 注意: これはStreamlit CloudのSecrets機能のバグを回避するための**一時的な措置**であり、セキュリティ上非常に危険です。デバッグ後にSecretsに戻してください。")
+    
+    # ハードコードされた認証情報 ('admin_pass'のハッシュ値)
+    hardcoded_users = {
+        "admin": {
+            "name": "管理者 (デバッグ)",
+            "password_hash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8831f65df05204c30" 
+        },
+        "user1": {
+            "name": "ユーザー１ (デバッグ)",
+            "password_hash": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8831f65df05204c30"
+        }
+    }
+    
+    st.info(f"✅ デバッグ情報: ハードコードされたユーザーがロードされました: {', '.join(hardcoded_users.keys())}")
+    return hardcoded_users
         
 # Secretsからユーザーデータをロード (アプリケーション起動時に一度だけ実行される)
 AUTHENTICATION_USERS = load_secrets_users()
@@ -96,7 +116,7 @@ def authenticate_user(username, password):
     print(f"入力ユーザー名: {username}")
     print(f"入力パスワードハッシュ: {input_hash}")
     
-    # HARDCODED_USERS を AUTHENTICATION_USERS に置き換え
+    # Secretsからロードした AUTHENTICATION_USERS を利用
     if username in AUTHENTICATION_USERS:
         stored_hash = AUTHENTICATION_USERS[username]["password_hash"]
         print(f"Secretsに格納されたユーザー名 ({username}) のハッシュ: {stored_hash}")
@@ -147,7 +167,6 @@ if st.session_state["authentication_status"] is not True:
                 st.error("ユーザー名またはパスワードが間違っています。")
         
         # 認証情報がSecretsから読み込まれていることを明示
-        st.info("認証情報はst.secretsの[auth_users]セクションから読み込まれています。")
         st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
 else:
     # ログイン成功時のサイドバー表示
@@ -169,6 +188,7 @@ if st.session_state["authentication_status"]:
     # ======================
     try:
         # Secretsのキーチェックを維持
+        # ハードコードモードでもSecretsが必要なので、ここではエラーチェックのみ
         if 'GEMINI_API_KEY' not in st.secrets:
              st.error("❌ GEMINI_API_KEY が設定されていません。Secretsに追加してください。")
              st.stop()
@@ -227,7 +247,7 @@ if st.session_state["authentication_status"]:
                             contents.append(img)
                             if i >= 2: break
                 except Exception as img_e:
-                    st.error(f"[{pdf_name}] 画像変換に失敗しました: {img_e}")
+                    st.error(f"[{pdf.name}] 画像変換に失敗しました: {img_e}")
                     return None
 
             try:
