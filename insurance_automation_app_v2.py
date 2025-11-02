@@ -11,6 +11,7 @@ from PIL import Image
 # from streamlit_authenticator import Hasher # 削除
 import time
 import hashlib # ハッシュ化のために追加
+import sys # デバッグ用に追加
 
 # ======================
 # 環境設定・デザイン
@@ -49,28 +50,32 @@ def hash_password(password):
 
 def load_secrets_users():
     """st.secretsからユーザー認証情報を読み込む"""
-    try:
-        secrets_users = {}
-        # st.secrets['auth_users']が存在するか確認
-        if "auth_users" in st.secrets:
-            for username, user_data in st.secrets["auth_users"].items():
-                # ユーザーデータが存在し、必須フィールドが含まれているかチェック
-                if user_data.get("name") and user_data.get("password_hash"):
-                    secrets_users[username] = {
-                        "name": user_data["name"],
-                        "password_hash": user_data["password_hash"]
-                    }
-        
-        # ユーザー情報がない場合は致命的なエラーメッセージを表示
-        if not secrets_users:
-            st.error("❌ 認証情報 (st.secrets の [auth_users] セクション) が見つかりません。`.streamlit/secrets.toml` ファイルを確認してください。")
-            st.stop()
-            
-        return secrets_users
-        
-    except Exception as e:
-        st.error(f"❌ 認証情報の読み込み中に致命的なエラーが発生しました: {e}")
+    secrets_users = {}
+    
+    # 1. 認証情報がSecretsに存在するか確認
+    if "auth_users" not in st.secrets:
+        st.error("❌ Secretsエラー: `[auth_users]` セクションが`.streamlit/secrets.toml`に見つかりません。")
         st.stop()
+        
+    try:
+        for username, user_data in st.secrets["auth_users"].items():
+            # ユーザーデータが存在し、必須フィールドが含まれているかチェック
+            if user_data.get("name") and user_data.get("password_hash"):
+                secrets_users[username] = {
+                    "name": user_data["name"],
+                    "password_hash": user_data["password_hash"]
+                }
+    except Exception as e:
+        # TOML解析エラーなどの致命的なエラーをキャッチ
+        st.error(f"❌ 認証情報の読み込み中に致命的なエラーが発生しました。SecretsファイルのTOML形式を確認してください: {e}")
+        st.stop()
+
+    # 2. ユーザー情報が実際にロードされたか確認
+    if not secrets_users:
+        st.error("❌ Secretsエラー: `[auth_users]` セクションはありますが、ユーザー情報が正しく定義されていません。")
+        st.stop()
+        
+    return secrets_users
 
 # Secretsからユーザーデータをロード (アプリケーション起動時に一度だけ実行される)
 AUTHENTICATION_USERS = load_secrets_users()
@@ -80,26 +85,18 @@ def authenticate_user(username, password):
     """ユーザー名とパスワードを検証する"""
     input_hash = hash_password(password) # 入力パスワードをハッシュ化
     
-    # デバッグログを追加
-    print(f"--- 認証試行 ---")
-    print(f"入力ユーザー名: {username}")
-    print(f"入力パスワードハッシュ: {input_hash}")
-    
+    # Secretsからロードされたユーザー情報と照合
     if username in AUTHENTICATION_USERS:
         stored_hash = AUTHENTICATION_USERS[username]["password_hash"]
-        print(f"Secretsに格納されたユーザー名 ({username}) のハッシュ: {stored_hash}")
         
         # 保存されているハッシュと比較
         if input_hash == stored_hash:
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
             st.session_state["username"] = username
-            print(f"認証成功: {username} ({st.session_state['name']})")
             return True
-        else:
-            print(f"認証失敗: ハッシュ値不一致。")
-    else:
-        print(f"認証失敗: ユーザー名 ({username}) がSecretsに見つかりません。")
+        # else: ハッシュ不一致 -> 失敗
+    # else: ユーザー名が見つからない -> 失敗
     
     st.session_state["authentication_status"] = False
     st.session_state["name"] = None
