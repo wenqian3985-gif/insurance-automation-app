@@ -41,20 +41,35 @@ if "authentication_status" not in st.session_state:
 if "name" not in st.session_state:
     st.session_state["name"] = None
 
-# Secretsからユーザーリストを読み込み、認証用の辞書に変換する
+# Secretsからユーザー情報をフラットに読み込み、認証用の辞書に変換する (最終堅牢版)
 def load_and_map_secrets():
     try:
-        # secrets.tomlの [auth_users] users = [...] リストを取得
-        user_list = st.secrets["auth_users"]["users"]
-        # 認証ロジックで使いやすいよう、{'username': {data}} の辞書に変換
-        mapped_users = {user['username']: user for user in user_list}
+        auth_config = st.secrets["auth_users"]
+        mapped_users = {}
+        
+        # フラットなキー (例: admin_name, admin_password) を解析して辞書に再構成
+        usernames = set()
+        for key in auth_config.keys():
+            if '_name' in key:
+                usernames.add(key.replace('_name', ''))
+
+        for user_key in usernames:
+            username = user_key
+            name_key = f"{user_key}_name"
+            pass_key = f"{user_key}_password"
+            
+            if name_key in auth_config and pass_key in auth_config:
+                mapped_users[username] = {
+                    "name": auth_config[name_key],
+                    "password": auth_config[pass_key]
+                }
+            
         if not mapped_users:
-             st.error("❌ Secretsファイルにユーザー情報が定義されていません。")
+             st.error("❌ Secretsファイルに有効なユーザー情報が定義されていません。`[auth_users]`セクションに `user_name` と `user_password` のペアがあることを確認してください。")
              st.stop()
         return mapped_users
     except KeyError:
-        # Secretsのキーが見つからない場合の処理
-        st.error("❌ Secretsファイルから認証情報 (`auth_users` または `users`) を読み込めませんでした。`.streamlit/secrets.toml`の構造を確認してください。")
+        st.error("❌ Secretsファイルから認証情報 (`auth_users`) を読み込めませんでした。`.streamlit/secrets.toml`の構造を確認してください。")
         st.session_state["authentication_status"] = False
         st.stop()
         return {}
