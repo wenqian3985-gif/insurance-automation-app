@@ -62,6 +62,7 @@ logger.addHandler(console_handler)
 def log_user_action(action_description):
     """
     ユーザーのアクションをロギングし、強制フラッシュするヘルパー関数
+    - INFOレベルで記録され、ファイルとコンソールの両方に出力される。
     """
     # 認証済みユーザー名を取得。未認証の場合は 'UNAUTHENTICATED' を使用
     username = st.session_state.get("username", "UNAUTHENTICATED")
@@ -69,13 +70,12 @@ def log_user_action(action_description):
     logger.info(action_description, extra={'user': username})
 
     # 【重要】強制フラッシュ: ログがバッファリングされるのを防ぎ、即座にファイルとターミナルに出力する
-    # 特に Streamlit 環境では、この強制フラッシュがターミナル出力の鍵となることが多い
     for handler in logger.handlers:
         handler.flush()
         
-# --- システム起動ログ ---
-# これにより、ロギングシステムが正しく動作しているか起動直後に確認できます。
-log_user_action("システム初期化完了: ロギングシステムをアクティブ化しました。")
+# --- システム起動ログ (ファイルには記録せず、ターミナルのみに出力) ---
+# DEBUGレベルに変更し、File HandlerのINFOレベル以上という設定によりログファイルへの重複書き込みを防ぐ
+logger.debug("システム初期化完了: ロギングシステムをアクティブ化しました。", extra={'user': 'SYSTEM'})
 # ------------------------
 
 # ======================
