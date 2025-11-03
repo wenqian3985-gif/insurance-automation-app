@@ -9,8 +9,8 @@ from pdf2image import convert_from_bytes
 from PIL import Image
 import time
 import logging
-import logging.handlers # ログファイルのローテーションハンドラを追加
-import sys # sysモジュールを追加 (StreamHandlerのストリーム指定に利用)
+import logging.handlers
+import sys
 
 # ======================
 # ログ設定 (強化版: StreamHandlerの確実な設定と強制フラッシュ)
@@ -46,13 +46,12 @@ try:
     file_handler.setLevel(logging.INFO) 
     logger.addHandler(file_handler)
     
-    # 【追加】ログファイルハンドラのステータスをセッションに保存
+    # ログファイルハンドラのステータスをセッションに保存 (UIからは削除)
     st.session_state["log_file_status"] = "✅ ログファイル転記設定は有効です" 
 
 except Exception as e:
-    # ログファイル書き込みが失敗した場合、エラーメッセージをセッションに保存
+    # ログファイル書き込みが失敗した場合、エラーメッセージをセッションに保存 (UIからは削除)
     st.session_state["log_file_status"] = f"❌ ログファイル転記エラー: {e} (環境のファイル書き込み権限を確認してください)"
-    # この警告は次に出力されるログとともにフラッシュされます
     logger.error(f"ログファイル('{LOG_FILENAME}')への書き込み設定に失敗しました。エラー: {e}", extra={'user': 'SYSTEM'})
 
 
@@ -79,7 +78,6 @@ def log_user_action(action_description):
         handler.flush()
         
 # --- システム起動ログ (ファイルには記録せず、ターミナルのみに出力) ---
-# DEBUGレベルに変更し、File HandlerのINFOレベル以上という設定によりログファイルへの重複書き込みを防ぐ
 logger.debug("システム初期化完了: ロギングシステムをアクティブ化しました。", extra={'user': 'SYSTEM'})
 # ------------------------
 
@@ -113,12 +111,11 @@ if "authentication_status" not in st.session_state:
     st.session_state["authentication_status"] = None
 if "name" not in st.session_state:
     st.session_state["name"] = None
-if "username" not in st.session_state: # username のセッション状態も初期化
+if "username" not in st.session_state:
     st.session_state["username"] = None
-# 新しいセッションステートを追加: PDF抽出時のメッセージを保持する
 if "extract_messages" not in st.session_state:
     st.session_state["extract_messages"] = []
-# 【追加】ログファイルステータス用のセッションステートを初期化
+# ログファイルステータス用のセッションステートを初期化 (UIには表示しないが内部で保持)
 if "log_file_status" not in st.session_state:
      st.session_state["log_file_status"] = "🔄 ログ設定を確認中..."
 
@@ -178,19 +175,19 @@ def authenticate_user(username, password):
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
             st.session_state["username"] = username
-            log_user_action("ログイン成功") # ★ ログ追加: ログイン成功 (フラッシュはlog_user_action内で実行)
+            log_user_action("ログイン成功") # ★ ログ追加: ログイン成功
             return True
     
     # 認証失敗
     st.session_state["authentication_status"] = False
     st.session_state["name"] = None
     st.session_state["username"] = None
-    log_user_action(f"ログイン失敗 (試行ユーザー: {username})") # ★ ログ追加: ログイン失敗 (フラッシュはlog_user_action内で実行)
+    log_user_action(f"ログイン失敗 (試行ユーザー: {username})") # ★ ログ追加: ログイン失敗
     return False
 
 def logout():
     """ログアウト処理"""
-    log_user_action("ログアウト") # ★ ログ追加: ログアウト (フラッシュはlog_user_action内で実行)
+    log_user_action("ログアウト") # ★ ログ追加: ログアウト
     # 関連するステートを None にリセット
     st.session_state["authentication_status"] = None
     st.session_state["name"] = None
@@ -220,13 +217,7 @@ if st.session_state["authentication_status"] is not True:
         
         st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
         
-        # 【追加】ログファイル転記ステータスをサイドバーに表示
-        st.markdown("---")
-        st.subheader("ログ転記ステータス")
-        if st.session_state["log_file_status"].startswith("✅"):
-            st.success(st.session_state["log_file_status"])
-        else:
-            st.error(st.session_state["log_file_status"])
+        # ログ転記ステータスの表示を削除しました
             
 else:
     # ログイン成功時のサイドバー表示
@@ -235,17 +226,7 @@ else:
         if st.button("ログアウト"):
             logout()
             
-        # 【追加】ログファイル転記ステータスをサイドバーに表示
-        st.markdown("---")
-        st.subheader("ログ転記ステータス")
-        if st.session_state["log_file_status"].startswith("✅"):
-            st.success(st.session_state["log_file_status"])
-        else:
-            st.error(st.session_state["log_file_status"])
-            
-        # ログダウンロード機能に関するUI要素は、ユーザーの要望に基づき削除済み。
-        # ログは引き続き 'app_usage.log' ファイルに記録されます。
-
+        # ログ転記ステータスの表示を削除しました
 
 # ======================
 # メインコンテンツの表示 (認証成功時)
