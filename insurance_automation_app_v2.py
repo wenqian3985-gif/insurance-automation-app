@@ -8,7 +8,7 @@ import google.generativeai as genai
 from pdf2image import convert_from_bytes
 from PIL import Image
 import time
-import hashlib # パスワードのハッシュ化に使用
+# パスワードのハッシュ化処理は使用しません
 
 # ======================
 # 環境設定・デザイン
@@ -41,36 +41,31 @@ if "authentication_status" not in st.session_state:
 if "name" not in st.session_state:
     st.session_state["name"] = None
 
-def hash_password(password):
-    """パスワードをSHA256でハッシュ化する"""
-    return hashlib.sha256(password.encode()).hexdigest()
-
 # 認証情報の取得とチェック
 try:
     # Secretsファイルから認証情報を読み込む
     AUTHENTICATION_USERS = st.secrets["auth_users"]
 except (KeyError, AttributeError):
-    # Secretsファイルが存在しないか、キーが見つからない場合のフォールバック
     st.error("❌ Secretsファイルから認証情報 `auth_users` を読み込めませんでした。`.streamlit/secrets.toml`を確認してください。")
     st.session_state["authentication_status"] = False
     st.stop()
 
 
 def authenticate_user(username, password):
-    """ユーザー名とパスワードを検証する"""
-    input_hash = hash_password(password) # 入力パスワードをハッシュ化
+    """ユーザー名と平文パスワードを検証する"""
     
     # Secretsから読み込んだユーザー情報と照合
     if username in AUTHENTICATION_USERS:
-        stored_hash = AUTHENTICATION_USERS[username]["password_hash"]
+        # 読み込んだ平文パスワードと比較
+        # Secretsファイルではキーが 'password' であることを想定
+        stored_password = AUTHENTICATION_USERS[username]["password"]
         
-        # 保存されているハッシュと比較
-        if input_hash == stored_hash:
+        if password == stored_password:
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
             st.session_state["username"] = username
             return True
-        # else: ハッシュ不一致 -> 失敗
+        # else: パスワード不一致 -> 失敗
     # else: ユーザー名が見つからない -> 失敗
     
     st.session_state["authentication_status"] = False
