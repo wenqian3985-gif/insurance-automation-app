@@ -42,6 +42,7 @@ try:
     )
     file_handler.setFormatter(log_format)
     logger.addHandler(file_handler)
+    # ↓ この時点で、ファイルはサーバー内部に作成されています。
 except Exception as e:
     # ファイル書き込みに失敗した場合（読み取り専用ファイルシステムの場合）
     # 代替としてConsole Handlerを追加し、Streamlitの標準出力にもログを残す
@@ -304,12 +305,12 @@ if st.session_state["authentication_status"]:
             except json.JSONDecodeError:
                 # 応答がJSONではない場合
                 # st.error(f"[{pdf_name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...") # メッセージはセッションステートに保存
-                st.session_state["extract_messages"].append(f"❌ {pdf_name}: Gemini応答をJSON解析できませんでした。")
+                st.session_state["extract_messages"].append(f"❌ {pdf.name}: Gemini応答をJSON解析できませんでした。")
                 return None
             except Exception as e:
                 # その他のAPI呼び出しエラー
                 # st.error(f"[{pdf_name}] Gemini API呼び出しエラー: {e}") # メッセージはセッションステートに保存
-                st.session_state["extract_messages"].append(f"❌ {pdf_name}: Gemini API呼び出しエラー - {e}")
+                st.session_state["extract_messages"].append(f"❌ {pdf.name}: Gemini API呼び出しエラー - {e}")
                 return None
 
     # Gemini APIでデータ分析と提案メッセージ生成
