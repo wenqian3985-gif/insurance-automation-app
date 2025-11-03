@@ -8,7 +8,7 @@ import google.generativeai as genai
 from pdf2image import convert_from_bytes
 from PIL import Image
 import time
-# パスワードのハッシュ化処理は使用しません
+# パスワードのハッシュ化処理は使用しません (平文パスワードを使用)
 
 # ======================
 # 環境設定・デザイン
@@ -41,23 +41,32 @@ if "authentication_status" not in st.session_state:
 if "name" not in st.session_state:
     st.session_state["name"] = None
 
-# 認証情報の取得とチェック
-try:
-    # Secretsファイルから認証情報を読み込む
-    AUTHENTICATION_USERS = st.secrets["auth_users"]
-except (KeyError, AttributeError):
-    st.error("❌ Secretsファイルから認証情報 `auth_users` を読み込めませんでした。`.streamlit/secrets.toml`を確認してください。")
-    st.session_state["authentication_status"] = False
-    st.stop()
+# Secretsからユーザーリストを読み込み、認証用の辞書に変換する
+def load_and_map_secrets():
+    try:
+        # secrets.tomlの [auth_users] users = [...] リストを取得
+        user_list = st.secrets["auth_users"]["users"]
+        # 認証ロジックで使いやすいよう、{'username': {data}} の辞書に変換
+        mapped_users = {user['username']: user for user in user_list}
+        if not mapped_users:
+             st.error("❌ Secretsファイルにユーザー情報が定義されていません。")
+             st.stop()
+        return mapped_users
+    except KeyError:
+        # Secretsのキーが見つからない場合の処理
+        st.error("❌ Secretsファイルから認証情報 (`auth_users` または `users`) を読み込めませんでした。`.streamlit/secrets.toml`の構造を確認してください。")
+        st.session_state["authentication_status"] = False
+        st.stop()
+        return {}
 
+# 認証情報辞書のロード (アプリケーション起動時に一度実行)
+AUTHENTICATION_USERS = load_and_map_secrets()
 
 def authenticate_user(username, password):
     """ユーザー名と平文パスワードを検証する"""
     
-    # Secretsから読み込んだユーザー情報と照合
+    # 認証用辞書 (AUTHENTICATION_USERS) と照合
     if username in AUTHENTICATION_USERS:
-        # 読み込んだ平文パスワードと比較
-        # Secretsファイルではキーが 'password' であることを想定
         stored_password = AUTHENTICATION_USERS[username]["password"]
         
         if password == stored_password:
@@ -200,9 +209,11 @@ if st.session_state["authentication_status"]:
                 
                 return json.loads(clean_text)
             except json.JSONDecodeError:
+                # 応答がJSONではない場合
                 st.error(f"[{pdf_name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...")
                 return None
             except Exception as e:
+                # その他のAPI呼び出しエラー
                 st.error(f"[{pdf_name}] Gemini API呼び出しエラー: {e}")
                 return None
 
@@ -256,6 +267,7 @@ if st.session_state["authentication_status"]:
                 
                 if data:
                     data["ファイル名"] = pdf.name
+                    # 抽出されたキーが fields に存在するか、または "ファイル名" の場合にのみ残す
                     cleaned_data = {k: v for k, v in data.items() if k in fields or k == "ファイル名"}
                     results.append(cleaned_data)
                     st.success(f"✅ {pdf.name} 抽出成功")
@@ -271,6 +283,7 @@ if st.session_state["authentication_status"]:
 
         if results:
             df = pd.DataFrame(results)
+            # 列の順序を設定: 抽出フィールド + ファイル名
             column_order = [f for f in fields if f in df.columns] + ["ファイル名"]
             df = df.reindex(columns=column_order)
             
@@ -284,7 +297,7 @@ if st.session_state["authentication_status"]:
         @st.cache_data
         def to_excel_bytes(df):
             output = io.BytesIO()
-            # エンジン名を "openypxl" から正しい "openpyxl" に修正
+            # ExcelWriterのエンジンは "openpyxl"
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 df.to_excel(writer, index=False, sheet_name="見積情報比較表")
             return output.getvalue()
@@ -301,4 +314,4 @@ if st.session_state["authentication_status"]:
         st.info("まだ抽出結果はありません。")
 
     st.markdown("---")
-    st.markdown("**保険業務自動化アシスタント** | Native Login + Gemini 2.5 Flash + Streamlit")
+    st.markdown("**保険業務自動化アシスタント** | Streamlit + Gemini 2.5 Flash")
