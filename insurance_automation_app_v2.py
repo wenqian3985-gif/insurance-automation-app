@@ -135,8 +135,7 @@ if st.session_state["authentication_status"] is not True:
             else:
                 st.error("ユーザー名またはパスワードが間違っています。")
         
-        st.info("認証情報は `.streamlit/secrets.toml` から読み込まれています。")
-        st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+        # 認証情報に関するメッセージは削除されています。
 else:
     # ログイン成功時のサイドバー表示
     with st.sidebar:
