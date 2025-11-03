@@ -7,11 +7,24 @@ import json
 import google.generativeai as genai
 from pdf2image import convert_from_bytes
 from PIL import Image
-# import streamlit_authenticator as stauth  # 削除
-# from streamlit_authenticator import Hasher # 削除
 import time
-import hashlib # ハッシュ化のために追加
-import sys # デバッグ用に追加
+import hashlib
+import sys
+
+# =========================================================================
+# 【デバッグ用】SECRETS値をコード内にハードコーディング
+# ※ 認証が成功したら、元のst.secretsを使うバージョンに戻してください
+# =========================================================================
+DEBUG_GEMINI_API_KEY = "AIzaSyCebpuZmUui7d01KR7aJIVfg-YLhqu3Mec" # あなたのAPIキーに置き換えてください
+# パスワード "admin_pass" のSHA256ハッシュ
+ADMIN_PASS_HASH = "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8831f65df05204c30"
+
+DEBUG_AUTHENTICATION_USERS = {
+    "admin": {"name": "管理者", "password_hash": ADMIN_PASS_HASH},
+    "user1": {"name": "ユーザー１", "password_hash": ADMIN_PASS_HASH}
+}
+# =========================================================================
+
 
 # ======================
 # 環境設定・デザイン
@@ -48,48 +61,18 @@ def hash_password(password):
     """パスワードをSHA256でハッシュ化する"""
     return hashlib.sha256(password.encode()).hexdigest()
 
-def load_secrets_users():
-    """st.secretsからユーザー認証情報を読み込む"""
-    secrets_users = {}
-    
-    # 1. 認証情報がSecretsに存在するか確認
-    if "auth_users" not in st.secrets:
-        st.error("❌ Secretsエラー: `[auth_users]` セクションが`.streamlit/secrets.toml`に見つかりません。")
-        st.stop()
-        
-    try:
-        for username, user_data in st.secrets["auth_users"].items():
-            # ユーザーデータが存在し、必須フィールドが含まれているかチェック
-            if user_data.get("name") and user_data.get("password_hash"):
-                secrets_users[username] = {
-                    "name": user_data["name"],
-                    "password_hash": user_data["password_hash"]
-                }
-    except Exception as e:
-        # TOML解析エラーなどの致命的なエラーをキャッチ
-        st.error(f"❌ 認証情報の読み込み中に致命的なエラーが発生しました。SecretsファイルのTOML形式を確認してください: {e}")
-        st.stop()
-
-    # 2. ユーザー情報が実際にロードされたか確認
-    if not secrets_users:
-        st.error("❌ Secretsエラー: `[auth_users]` セクションはありますが、ユーザー情報が正しく定義されていません。")
-        st.stop()
-        
-    return secrets_users
-
-# Secretsからユーザーデータをロード (アプリケーション起動時に一度だけ実行される)
-AUTHENTICATION_USERS = load_secrets_users()
+# デバッグのため、直接ハードコーディングされたユーザーリストを使用
+AUTHENTICATION_USERS = DEBUG_AUTHENTICATION_USERS
 
 
 def authenticate_user(username, password):
     """ユーザー名とパスワードを検証する"""
     input_hash = hash_password(password) # 入力パスワードをハッシュ化
     
-    # Secretsからロードされたユーザー情報と照合
+    # ハードコーディングされたユーザー情報と照合
     if username in AUTHENTICATION_USERS:
         stored_hash = AUTHENTICATION_USERS[username]["password_hash"]
         
-        # 保存されているハッシュと比較
         if input_hash == stored_hash:
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
@@ -131,8 +114,8 @@ if st.session_state["authentication_status"] is not True:
             else:
                 st.error("ユーザー名またはパスワードが間違っています。")
         
-        # 認証情報がSecretsから読み込まれていることを明示
-        st.info("認証情報は`.streamlit/secrets.toml`の`[auth_users]`セクションから読み込まれています。")
+        # Secretsエラーの可能性を排除するため、デバッグ中であることを明示
+        st.warning("⚠️ 現在、認証情報はPythonコード内にハードコーディングされています。")
         st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
 else:
     # ログイン成功時のサイドバー表示
@@ -150,19 +133,20 @@ if st.session_state["authentication_status"]:
     st.subheader("📄 保険自動化システム メイン機能")
 
     # ======================
-    # GEMINI 初期化
+    # GEMINI 初期化 (デバッグ用APIキーを使用)
     # ======================
     try:
-        # Secretsのキーチェックを維持
-        if 'GEMINI_API_KEY' not in st.secrets:
-             st.error("❌ GEMINI_API_KEY が設定されていません。Secretsに追加してください。")
-             st.stop()
+        # デバッグ用APIキーを使用
+        GEMINI_API_KEY = DEBUG_GEMINI_API_KEY
+        
+        if not GEMINI_API_KEY:
+            st.error("❌ GEMINI APIキーが設定されていません。コード内の`DEBUG_GEMINI_API_KEY`を確認してください。")
+            st.stop()
              
-        GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=GEMINI_API_KEY)
         model = genai.GenerativeModel("gemini-2.5-flash")
-    except KeyError:
-        st.error("❌ GEMINI_API_KEY が設定されていません。Secretsに追加してください。")
+    except Exception as e:
+        st.error(f"❌ Gemini初期化エラー: {e}")
         st.stop()
 
 
@@ -227,12 +211,9 @@ if st.session_state["authentication_status"]:
                 
                 return json.loads(clean_text)
             except json.JSONDecodeError:
-                # エラーメッセージを分かりやすく修正
-                # 処理中のPDFファイル名がここでは使えないため、pdf_nameを使用
                 st.error(f"[{pdf_name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...")
                 return None
             except Exception as e:
-                # 処理中のPDFファイル名がここでは使えないため、pdf_nameを使用
                 st.error(f"[{pdf_name}] Gemini API呼び出しエラー: {e}")
                 return None
 
@@ -314,7 +295,7 @@ if st.session_state["authentication_status"]:
         @st.cache_data
         def to_excel_bytes(df):
             output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer: # openpyxlに修正
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 df.to_excel(writer, index=False, sheet_name="見積情報比較表")
             return output.getvalue()
 
