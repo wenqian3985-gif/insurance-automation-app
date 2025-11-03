@@ -8,7 +8,59 @@ import google.generativeai as genai
 from pdf2image import convert_from_bytes
 from PIL import Image
 import time
+import logging
+import logging.handlers # ログファイルのローテーションハンドラを追加
+
 # パスワードのハッシュ化処理は使用しません (平文パスワードを使用)
+
+# ======================
+# ログ設定 (FileHandlerを使用)
+# ======================
+LOG_FILENAME = "app_usage.log"
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# 既存のハンドラをクリア (二重ロギング防止)
+if logger.hasHandlers():
+    logger.handlers.clear()
+
+# フォーマッタ設定
+log_format = logging.Formatter(
+    fmt='%(asctime)s - %(levelname)s - USER:%(user)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# File Handler: ログファイルに書き込む (最大10MB、バックアップファイル5つ)
+try:
+    file_handler = logging.handlers.RotatingFileHandler(
+        LOG_FILENAME, 
+        maxBytes=10*1024*1024, # 10MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(log_format)
+    logger.addHandler(file_handler)
+except Exception as e:
+    # ファイル書き込みに失敗した場合（読み取り専用ファイルシステムの場合）
+    # 代替としてConsole Handlerを追加し、Streamlitの標準出力にもログを残す
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_format)
+    logger.addHandler(console_handler)
+    logger.warning(f"ログファイル('{LOG_FILENAME}')への書き込みができません。コンソールにのみ出力します。エラー: {e}")
+
+
+def log_user_action(action_description):
+    """
+    ユーザーのアクションをロギングするヘルパー関数
+    セッションステートからユーザー情報を取得
+    """
+    # 認証済みユーザー名を取得。未認証の場合は 'UNAUTHENTICATED' を使用
+    username = st.session_state.get("username", "UNAUTHENTICATED")
+    # extra dictを使い、ロガーのフォーマットに 'user' フィールドを渡す
+    logger.info(action_description, extra={'user': username})
+
 
 # ======================
 # 環境設定・デザイン
@@ -101,16 +153,19 @@ def authenticate_user(username, password):
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
             st.session_state["username"] = username
+            log_user_action("ログイン成功") # ★ ログ追加: ログイン成功
             return True
     
     # 認証失敗
     st.session_state["authentication_status"] = False
     st.session_state["name"] = None
     st.session_state["username"] = None
+    log_user_action(f"ログイン失敗 (試行ユーザー: {username})") # ★ ログ追加: ログイン失敗
     return False
 
 def logout():
     """ログアウト処理"""
+    log_user_action("ログアウト") # ★ ログ追加: ログアウト
     # 関連するステートを None にリセット
     st.session_state["authentication_status"] = None
     st.session_state["name"] = None
@@ -146,6 +201,10 @@ else:
         st.success(f"ようこそ、{st.session_state['name']}さん！")
         if st.button("ログアウト"):
             logout()
+            
+        # ログダウンロード機能に関するUI要素は、ユーザーの要望に基づき削除済み。
+        # ログは引き続き 'app_usage.log' ファイルに記録されます。
+
 
 # ======================
 # メインコンテンツの表示 (認証成功時)
@@ -215,7 +274,7 @@ if st.session_state["authentication_status"]:
             # テキストが不十分な場合は画像も追加
             if not text or len(text) < 100:
                 # st.warning(f"[{pdf_name}] テキスト抽出が不十分なため、画像として処理を試みます。") # メッセージはセッションステートに保存
-                st.session_state["extract_messages"].append(f"⚠️ {pdf_name}: テキスト抽出が不十分なため、画像として処理を試みました。")
+                st.session_state["extract_messages"].append(f"⚠️ {pdf.name}: テキスト抽出が不十分なため、画像として処理を試みました。")
                 try:
                     # PDFを画像に変換して、最初の数ページをContentsに追加
                     images = convert_from_bytes(pdf_bytes)
@@ -224,7 +283,7 @@ if st.session_state["authentication_status"]:
                         if i >= 2: break # 最大3ページまでを画像として送る
                 except Exception as img_e:
                     # st.error(f"[{pdf.name}] 画像変換に失敗しました: {img_e}") # メッセージはセッションステートに保存
-                    st.session_state["extract_messages"].append(f"❌ {pdf_name}: 画像変換に失敗しました - {img_e}")
+                    st.session_state["extract_messages"].append(f"❌ {pdf.name}: 画像変換に失敗しました - {img_e}")
             
             # テキストが抽出できた場合はテキストをContentsに追加
             if text and len(text) >= 100:
@@ -322,6 +381,7 @@ if st.session_state["authentication_status"]:
             st.session_state["customer_df"] = df_customer # 既存データを保存 (要件3)
             
             st.success("✅ 顧客情報ファイルを読み込み、列名を抽出フィールドとして設定しました。")
+            log_user_action(f"顧客情報ファイルアップロード: {customer_file.name}") # ★ ログ追加: Excelファイルアップロード
             st.dataframe(df_customer, use_container_width=True)
 
         except Exception as e:
@@ -347,6 +407,8 @@ if st.session_state["authentication_status"]:
     uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True, key="pdf_uploader")
     
     if uploaded_pdfs and st.button("PDFから情報を抽出", key="extract_button"):
+        log_user_action(f"PDF抽出開始: {len(uploaded_pdfs)}件のファイル") # ★ ログ追加: PDF抽出開始
+        
         # 抽出ボタンが押されたら、以前の提案メッセージと抽出メッセージをクリア
         st.session_state["proposal_message"] = "" 
         st.session_state["extract_messages"] = [] # メッセージをリセット
@@ -414,6 +476,7 @@ if st.session_state["authentication_status"]:
             df_final = df_final.astype(str)
                 
             st.session_state["comparison_df"] = df_final
+            log_user_action(f"PDF抽出完了: {len(results)}件のレコードを比較表に追加") # ★ ログ追加: PDF抽出完了
         else:
             if not st.session_state["extract_messages"]:
                 st.session_state["extract_messages"].append("PDFから情報を抽出できませんでした。処理ログを確認してください。")
@@ -457,7 +520,8 @@ if st.session_state["authentication_status"]:
             "📥 Excelでダウンロード",
             data=excel_data,
             file_name=download_filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            on_click=lambda: log_user_action(f"抽出結果ダウンロード: {download_filename}") # ★ ログ追加: ダウンロード
         )
     else:
         st.info("まだ抽出結果はありません。")
@@ -467,9 +531,11 @@ if st.session_state["authentication_status"]:
     if not st.session_state["comparison_df"].empty:
         
         if st.button("提案メッセージを作成・表示", key="analyze_button"):
+            log_user_action("提案メッセージ生成開始") # ★ ログ追加: 提案生成開始
             # 提案メッセージを生成し、セッションに保存
             proposal = analyze_and_generate_proposal(st.session_state["comparison_df"])
             st.session_state["proposal_message"] = proposal
+            log_user_action("提案メッセージ生成完了") # ★ ログ追加: 提案生成完了
             
         if st.session_state["proposal_message"]:
             st.markdown("---")
