@@ -219,7 +219,7 @@ if st.session_state["authentication_status"]:
                         contents.append(img)
                         if i >= 2: break # 最大3ページまでを画像として送る
                 except Exception as img_e:
-                    st.error(f"[{pdf_name}] 画像変換に失敗しました: {img_e}")
+                    st.error(f"[{pdf.name}] 画像変換に失敗しました: {img_e}")
             
             # テキストが抽出できた場合はテキストをContentsに追加
             if text and len(text) >= 100:
@@ -256,6 +256,8 @@ if st.session_state["authentication_status"]:
         st.session_state["customer_df"] = pd.DataFrame()
     if "comparison_df" not in st.session_state:
         st.session_state["comparison_df"] = pd.DataFrame()
+    if "customer_file_name" not in st.session_state: # アップロードファイル名保存用の新しいステート
+        st.session_state["customer_file_name"] = None
 
 
     st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード (任意)</div>', unsafe_allow_html=True)
@@ -264,17 +266,21 @@ if st.session_state["authentication_status"]:
     if customer_file:
         try:
             df_customer = pd.read_excel(customer_file)
+            st.session_state["customer_file_name"] = customer_file.name # アップロードファイル名を保存 (要件2)
+
             new_fields = df_customer.columns.tolist()
             st.session_state["fields"] = new_fields
-            st.session_state["customer_df"] = df_customer 
+            st.session_state["customer_df"] = df_customer # 既存データを保存 (要件3)
             
             st.success("✅ 顧客情報ファイルを読み込み、列名を抽出フィールドとして設定しました。")
             st.dataframe(df_customer, use_container_width=True)
 
         except Exception as e:
             st.error(f"Excelファイルの読み込みエラー: {e}")
+            # エラー時は初期値に戻す
             st.session_state["fields"] = ["氏名", "生年月日", "保険会社名", "保険期間", "保険金額", "補償内容"]
             st.session_state["customer_df"] = pd.DataFrame()
+            st.session_state["customer_file_name"] = None
             
     st.info(f"現在の抽出フィールド: {', '.join(st.session_state['fields'])}")
 
@@ -311,13 +317,42 @@ if st.session_state["authentication_status"]:
         progress_bar.empty()
 
         if results:
-            df = pd.DataFrame(results)
-            # 列の順序を設定: 抽出フィールド + ファイル名
-            column_order = [f for f in fields if f in df.columns] + ["ファイル名"]
-            df = df.reindex(columns=column_order)
+            df_extracted = pd.DataFrame(results) # PDFから抽出した新しいデータ
             
-            st.session_state["comparison_df"] = df
-            st.dataframe(df, use_container_width=True)
+            # 既存の顧客データがあるかチェック (要件3: 既存データに追記)
+            if not st.session_state["customer_df"].empty:
+                df_customer = st.session_state["customer_df"].copy()
+                
+                # 既存データと抽出結果の列を揃えるための列リストを作成
+                cols_to_use = df_customer.columns.tolist()
+                
+                # 要件1: 既存データに「ファイル名」列がない場合、結合のために追加する
+                if "ファイル名" not in cols_to_use:
+                    cols_to_use.append("ファイル名")
+                    
+                # 既存データと抽出データの列を cols_to_use に揃える（足りない列はNaNで埋まる）
+                df_customer = df_customer.reindex(columns=cols_to_use)
+                df_extracted = df_extracted.reindex(columns=cols_to_use)
+                
+                # 既存データの下に抽出データを追記
+                df_final = pd.concat([df_customer, df_extracted], ignore_index=True)
+                
+            else:
+                # 既存データがない場合は、抽出結果のみを使用
+                fields = st.session_state["fields"]
+                # 順序を設定: 抽出フィールド + ファイル名 (要件1: ファイル名がfieldsにない場合は最後に追加)
+                column_order = [f for f in fields if f in df_extracted.columns]
+                if "ファイル名" in df_extracted.columns and "ファイル名" not in column_order:
+                     column_order.append("ファイル名")
+
+                df_final = df_extracted.reindex(columns=column_order)
+            
+            # FIX: Streamlit/PyArrowのValueError (混合データ型) を避けるため、
+            # DataFrameを表示・保存する前に全ての列を文字列に変換する
+            df_final = df_final.astype(str)
+                
+            st.session_state["comparison_df"] = df_final
+            st.dataframe(df_final, use_container_width=True)
         else:
             st.warning("PDFから情報を抽出できませんでした。処理ログを確認してください。")
 
@@ -333,10 +368,17 @@ if st.session_state["authentication_status"]:
 
         excel_data = to_excel_bytes(st.session_state["comparison_df"])
         
+        # ダウンロードファイル名設定 (要件2: アップロードファイル名を使用)
+        download_filename = "見積情報比較表_抽出結果.xlsx"
+        if st.session_state.get("customer_file_name"):
+            # 拡張子を除去して "_抽出結果.xlsx" を追加
+            base_name = os.path.splitext(st.session_state["customer_file_name"])[0]
+            download_filename = f"{base_name}_抽出結果.xlsx"
+            
         st.download_button(
             "📥 Excelでダウンロード",
             data=excel_data,
-            file_name="見積情報比較表_抽出結果.xlsx",
+            file_name=download_filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
