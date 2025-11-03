@@ -261,7 +261,10 @@ if st.session_state["authentication_status"]:
 
 
     st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード (任意)</div>', unsafe_allow_html=True)
-    customer_file = st.file_uploader("顧客情報.xlsx をアップロード", type=["xlsx"], key="customer_uploader")
+    
+    # 1. 「顧客情報.xlsx をアップロード」の修正
+    customer_file = st.file_uploader("Excelファイルをアップロードした場合は、Excelファイルの項目でPDFの情報を抽出します", 
+                                     type=["xlsx"], key="customer_uploader")
     
     if customer_file:
         try:
@@ -282,7 +285,16 @@ if st.session_state["authentication_status"]:
             st.session_state["customer_df"] = pd.DataFrame()
             st.session_state["customer_file_name"] = None
             
-    st.info(f"現在の抽出フィールド: {', '.join(st.session_state['fields'])}")
+    # 2. 「現在の抽出フィールド: ...」の修正
+    default_fields_str = "氏名, 生年月日, 保険会社名, 保険期間, 保険金額, 補償内容"
+    if st.session_state["customer_file_name"]:
+        # Excelファイルがアップロードされている場合
+        field_info = f"現在の抽出フィールド: {', '.join(st.session_state['fields'])}"
+    else:
+        # Excelファイルがアップロードされていない場合
+        field_info = f"Excelファイルをアップロードしない場合は、システム既存項目（{default_fields_str}）でPDF情報を抽出します。"
+        
+    st.info(field_info)
 
 
     st.markdown('<div class="section-header">📄 2. 見積書PDFから情報抽出</div>', unsafe_allow_html=True)
