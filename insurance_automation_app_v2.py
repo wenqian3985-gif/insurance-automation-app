@@ -246,6 +246,40 @@ if st.session_state["authentication_status"]:
                 st.error(f"[{pdf_name}] Gemini API呼び出しエラー: {e}")
                 return None
 
+    # Gemini APIでデータ分析と提案メッセージ生成
+    def analyze_and_generate_proposal(df):
+        """データフレームの保険情報を分析し、顧客向け提案メッセージを生成する"""
+        
+        # DataFrameをMarkdownテーブル形式に変換してプロンプトに含める
+        df_markdown = df.to_markdown(index=False)
+        
+        prompt = (
+            "以下の保険情報比較表を詳細に分析し、顧客への提案メッセージを作成してください。\n"
+            "データには複数の保険見積書からの抽出情報が含まれている可能性があります。\n"
+            "提案メッセージは、以下の要件を満たしてください。\n\n"
+            "【提案メッセージ要件】\n"
+            "1. 顧客が理解しやすい平易な日本語で記述すること。\n"
+            "2. 既存の保険や比較対象の保険の情報を簡潔にまとめ、各項目の違い（特に保険金額、期間、補償内容）を明確に比較すること。\n"
+            "3. 分析に基づき、顧客にとって最適な選択肢（または検討すべき点）を専門的な観点から提案すること。\n"
+            "4. 提案は親身でプロフェッショナルなトーンで行うこと。\n"
+            "5. 回答は提案メッセージ本文のみとし、コードブロックや追加のJSON形式を含めないこと。\n\n"
+            "【保険情報比較表データ】\n"
+            f"{df_markdown}"
+        )
+
+        with st.spinner("🤖 保険情報の比較分析と提案メッセージを生成中..."):
+            try:
+                # generate_contentを使用し、分析と提案の生成を依頼
+                response = model.generate_content(prompt)
+                
+                if response and response.text:
+                    return response.text.strip()
+                else:
+                    return "Geminiからの提案メッセージを取得できませんでした。"
+            except Exception as e:
+                return f"提案生成中にエラーが発生しました: {e}"
+
+
     # ======================
     # アプリ本体
     # ======================
@@ -258,6 +292,8 @@ if st.session_state["authentication_status"]:
         st.session_state["comparison_df"] = pd.DataFrame()
     if "customer_file_name" not in st.session_state: # アップロードファイル名保存用の新しいステート
         st.session_state["customer_file_name"] = None
+    if "proposal_message" not in st.session_state: # 提案メッセージ保存用の新しいステートを追加
+        st.session_state["proposal_message"] = ""
 
 
     st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード (任意)</div>', unsafe_allow_html=True)
@@ -301,6 +337,9 @@ if st.session_state["authentication_status"]:
     uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True, key="pdf_uploader")
     
     if uploaded_pdfs and st.button("PDFから情報を抽出", key="extract_button"):
+        # 抽出ボタンが押されたら、以前の提案メッセージをクリア
+        st.session_state["proposal_message"] = "" 
+        
         results = []
         fields = st.session_state["fields"]
 
@@ -394,6 +433,28 @@ if st.session_state["authentication_status"]:
         )
     else:
         st.info("まだ抽出結果はありません。")
+
+    # 新しいセクションを追加
+    st.markdown('<div class="section-header">💬 4. 比較分析と提案メッセージの作成</div>', unsafe_allow_html=True)
+    if not st.session_state["comparison_df"].empty:
+        
+        if st.button("提案メッセージを作成・表示", key="analyze_button"):
+            # 提案メッセージを生成し、セッションに保存
+            proposal = analyze_and_generate_proposal(st.session_state["comparison_df"])
+            st.session_state["proposal_message"] = proposal
+            
+        if st.session_state["proposal_message"]:
+            st.markdown("---")
+            st.markdown("### 顧客向け提案メッセージ")
+            # 提案メッセージをMarkdownとして表示
+            st.markdown(st.session_state["proposal_message"])
+            st.markdown("---")
+        elif "proposal_message" in st.session_state:
+            st.info("提案メッセージを作成するには、上のボタンを押してください。")
+            
+    else:
+        st.info("比較分析を行うには、先にPDFから情報を抽出してください。")
+
 
     st.markdown("---")
     st.markdown("**保険業務自動化アシスタント** | Streamlit + Gemini 2.5 Flash")
