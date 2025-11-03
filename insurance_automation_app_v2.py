@@ -42,6 +42,9 @@ if "name" not in st.session_state:
     st.session_state["name"] = None
 if "username" not in st.session_state: # username のセッション状態も初期化
     st.session_state["username"] = None
+# 新しいセッションステートを追加: PDF抽出時のメッセージを保持する
+if "extract_messages" not in st.session_state:
+    st.session_state["extract_messages"] = []
 
 def load_and_map_secrets():
     """Secretsからユーザー情報を読み込み、login_usernameをキーとする辞書を生成する"""
@@ -211,7 +214,8 @@ if st.session_state["authentication_status"]:
             
             # テキストが不十分な場合は画像も追加
             if not text or len(text) < 100:
-                st.warning(f"[{pdf_name}] テキスト抽出が不十分なため、画像として処理を試みます。")
+                # st.warning(f"[{pdf_name}] テキスト抽出が不十分なため、画像として処理を試みます。") # メッセージはセッションステートに保存
+                st.session_state["extract_messages"].append(f"⚠️ {pdf_name}: テキスト抽出が不十分なため、画像として処理を試みました。")
                 try:
                     # PDFを画像に変換して、最初の数ページをContentsに追加
                     images = convert_from_bytes(pdf_bytes)
@@ -219,7 +223,8 @@ if st.session_state["authentication_status"]:
                         contents.append(img)
                         if i >= 2: break # 最大3ページまでを画像として送る
                 except Exception as img_e:
-                    st.error(f"[{pdf.name}] 画像変換に失敗しました: {img_e}")
+                    # st.error(f"[{pdf.name}] 画像変換に失敗しました: {img_e}") # メッセージはセッションステートに保存
+                    st.session_state["extract_messages"].append(f"❌ {pdf_name}: 画像変換に失敗しました - {img_e}")
             
             # テキストが抽出できた場合はテキストをContentsに追加
             if text and len(text) >= 100:
@@ -239,11 +244,13 @@ if st.session_state["authentication_status"]:
                 return json.loads(clean_text)
             except json.JSONDecodeError:
                 # 応答がJSONではない場合
-                st.error(f"[{pdf_name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...")
+                # st.error(f"[{pdf_name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...") # メッセージはセッションステートに保存
+                st.session_state["extract_messages"].append(f"❌ {pdf_name}: Gemini応答をJSON解析できませんでした。")
                 return None
             except Exception as e:
                 # その他のAPI呼び出しエラー
-                st.error(f"[{pdf_name}] Gemini API呼び出しエラー: {e}")
+                # st.error(f"[{pdf_name}] Gemini API呼び出しエラー: {e}") # メッセージはセッションステートに保存
+                st.session_state["extract_messages"].append(f"❌ {pdf_name}: Gemini API呼び出しエラー - {e}")
                 return None
 
     # Gemini APIでデータ分析と提案メッセージ生成
@@ -296,6 +303,7 @@ if st.session_state["authentication_status"]:
         st.session_state["customer_file_name"] = None
     if "proposal_message" not in st.session_state: # 提案メッセージ保存用の新しいステートを追加
         st.session_state["proposal_message"] = ""
+    # st.session_state["extract_messages"] は冒頭で初期化済み
 
 
     st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード (任意)</div>', unsafe_allow_html=True)
@@ -339,8 +347,9 @@ if st.session_state["authentication_status"]:
     uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True, key="pdf_uploader")
     
     if uploaded_pdfs and st.button("PDFから情報を抽出", key="extract_button"):
-        # 抽出ボタンが押されたら、以前の提案メッセージをクリア
+        # 抽出ボタンが押されたら、以前の提案メッセージと抽出メッセージをクリア
         st.session_state["proposal_message"] = "" 
+        st.session_state["extract_messages"] = [] # メッセージをリセット
         
         results = []
         fields = st.session_state["fields"]
@@ -358,12 +367,12 @@ if st.session_state["authentication_status"]:
                     # 抽出されたキーが fields に存在するか、または "ファイル名" の場合にのみ残す
                     cleaned_data = {k: v for k, v in data.items() if k in fields or k == "ファイル名"}
                     results.append(cleaned_data)
-                    st.success(f"✅ {pdf.name} 抽出成功")
+                    st.session_state["extract_messages"].append(f"✅ {pdf.name} 抽出成功") # メッセージをセッションに保存
                 else:
-                    st.warning(f"⚠️ {pdf.name} は抽出に失敗したか、無効な結果を返しました。")
+                    st.session_state["extract_messages"].append(f"⚠️ {pdf.name} は抽出に失敗したか、無効な結果を返しました。") # メッセージをセッションに保存
                     
             except Exception as e:
-                st.error(f"❌ {pdf.name} 処理中に予期せぬエラー: {str(e)}")
+                st.session_state["extract_messages"].append(f"❌ {pdf.name} 処理中に予期せぬエラー: {str(e)}") # メッセージをセッションに保存
             
             progress_bar.progress((i + 1) / total_pdfs)
         
@@ -405,9 +414,26 @@ if st.session_state["authentication_status"]:
             df_final = df_final.astype(str)
                 
             st.session_state["comparison_df"] = df_final
-            st.dataframe(df_final, use_container_width=True)
         else:
-            st.warning("PDFから情報を抽出できませんでした。処理ログを確認してください。")
+            if not st.session_state["extract_messages"]:
+                st.session_state["extract_messages"].append("PDFから情報を抽出できませんでした。処理ログを確認してください。")
+
+    # 抽出メッセージの表示
+    if st.session_state["extract_messages"]:
+        with st.container():
+            for msg in st.session_state["extract_messages"]:
+                if msg.startswith("✅"):
+                    st.success(msg)
+                elif msg.startswith("⚠️"):
+                    st.warning(msg)
+                elif msg.startswith("❌"):
+                    st.error(msg)
+                else:
+                    st.info(msg) # その他のメッセージ
+
+    # 抽出データフレームの表示
+    if not st.session_state["comparison_df"].empty:
+        st.dataframe(st.session_state["comparison_df"], use_container_width=True)
 
     st.markdown('<div class="section-header">📊 3. 抽出結果をダウンロード</div>', unsafe_allow_html=True)
     if not st.session_state["comparison_df"].empty:
