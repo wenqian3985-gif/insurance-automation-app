@@ -46,10 +46,15 @@ try:
     file_handler.setLevel(logging.INFO) 
     logger.addHandler(file_handler)
     
+    # 【追加】ログファイルハンドラのステータスをセッションに保存
+    st.session_state["log_file_status"] = "✅ ログファイル転記設定は有効です" 
+
 except Exception as e:
-    # ファイル設定エラーは、ログ出力が確立した後にコンソールに出力される
+    # ログファイル書き込みが失敗した場合、エラーメッセージをセッションに保存
+    st.session_state["log_file_status"] = f"❌ ログファイル転記エラー: {e} (環境のファイル書き込み権限を確認してください)"
     # この警告は次に出力されるログとともにフラッシュされます
-    logger.warning(f"ログファイル('{LOG_FILENAME}')への書き込み設定に失敗しました。エラー: {e}", extra={'user': 'SYSTEM'})
+    logger.error(f"ログファイル('{LOG_FILENAME}')への書き込み設定に失敗しました。エラー: {e}", extra={'user': 'SYSTEM'})
+
 
 # 2. Console Handler: コンソール（ターミナル）に常時出力する
 # StreamHandlerのストリームを sys.stdout に明示的に設定し、確実に出力されるようにします。
@@ -113,6 +118,10 @@ if "username" not in st.session_state: # username のセッション状態も初
 # 新しいセッションステートを追加: PDF抽出時のメッセージを保持する
 if "extract_messages" not in st.session_state:
     st.session_state["extract_messages"] = []
+# 【追加】ログファイルステータス用のセッションステートを初期化
+if "log_file_status" not in st.session_state:
+     st.session_state["log_file_status"] = "🔄 ログ設定を確認中..."
+
 
 def load_and_map_secrets():
     """Secretsからユーザー情報を読み込み、login_usernameをキーとする辞書を生成する"""
@@ -210,12 +219,29 @@ if st.session_state["authentication_status"] is not True:
                 st.error("ユーザー名またはパスワードが間違っています。")
         
         st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
+        
+        # 【追加】ログファイル転記ステータスをサイドバーに表示
+        st.markdown("---")
+        st.subheader("ログ転記ステータス")
+        if st.session_state["log_file_status"].startswith("✅"):
+            st.success(st.session_state["log_file_status"])
+        else:
+            st.error(st.session_state["log_file_status"])
+            
 else:
     # ログイン成功時のサイドバー表示
     with st.sidebar:
         st.success(f"ようこそ、{st.session_state['name']}さん！")
         if st.button("ログアウト"):
             logout()
+            
+        # 【追加】ログファイル転記ステータスをサイドバーに表示
+        st.markdown("---")
+        st.subheader("ログ転記ステータス")
+        if st.session_state["log_file_status"].startswith("✅"):
+            st.success(st.session_state["log_file_status"])
+        else:
+            st.error(st.session_state["log_file_status"])
             
         # ログダウンロード機能に関するUI要素は、ユーザーの要望に基づき削除済み。
         # ログは引き続き 'app_usage.log' ファイルに記録されます。
