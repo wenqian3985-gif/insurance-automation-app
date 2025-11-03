@@ -250,11 +250,13 @@ if st.session_state["authentication_status"]:
     def analyze_and_generate_proposal(df):
         """データフレームの保険情報を分析し、顧客向け提案メッセージを生成する"""
         
-        # DataFrameをMarkdownテーブル形式に変換してプロンプトに含める
-        df_markdown = df.to_markdown(index=False)
+        # 【修正点】df.to_markdown()をdf.to_string()に変更し、tabulate依存を解消
+        # DataFrameを文字列形式に変換してプロンプトに含める
+        df_string = df.to_string(index=False)
         
         prompt = (
             "以下の保険情報比較表を詳細に分析し、顧客への提案メッセージを作成してください。\n"
+            "データは表形式の文字列として提供されます。これを読み取り、適切な形で比較分析を行ってください。\n"
             "データには複数の保険見積書からの抽出情報が含まれている可能性があります。\n"
             "提案メッセージは、以下の要件を満たしてください。\n\n"
             "【提案メッセージ要件】\n"
@@ -263,8 +265,8 @@ if st.session_state["authentication_status"]:
             "3. 分析に基づき、顧客にとって最適な選択肢（または検討すべき点）を専門的な観点から提案すること。\n"
             "4. 提案は親身でプロフェッショナルなトーンで行うこと。\n"
             "5. 回答は提案メッセージ本文のみとし、コードブロックや追加のJSON形式を含めないこと。\n\n"
-            "【保険情報比較表データ】\n"
-            f"{df_markdown}"
+            "【保険情報比較表データ (列: '氏名', '生年月日', '保険会社名', '保険期間', '保険金額', '補償内容', 'ファイル名' など)】\n"
+            f"```data\n{df_string}\n```"
         )
 
         with st.spinner("🤖 保険情報の比較分析と提案メッセージを生成中..."):
@@ -298,7 +300,7 @@ if st.session_state["authentication_status"]:
 
     st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード (任意)</div>', unsafe_allow_html=True)
     
-    # 1. 「顧客情報.xlsx をアップロード」の修正
+    # 1. ファイルアップロードの説明を修正
     customer_file = st.file_uploader("Excelファイルをアップロードした場合は、Excelファイルの項目でPDFの情報を抽出します", 
                                      type=["xlsx"], key="customer_uploader")
     
@@ -321,7 +323,7 @@ if st.session_state["authentication_status"]:
             st.session_state["customer_df"] = pd.DataFrame()
             st.session_state["customer_file_name"] = None
             
-    # 2. 「現在の抽出フィールド: ...」の修正
+    # 2. 抽出フィールドの説明を修正
     default_fields_str = "氏名, 生年月日, 保険会社名, 保険期間, 保険金額, 補償内容"
     if st.session_state["customer_file_name"]:
         # Excelファイルがアップロードされている場合
