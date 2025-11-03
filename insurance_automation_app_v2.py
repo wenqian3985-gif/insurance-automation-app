@@ -136,6 +136,7 @@ if st.session_state["authentication_status"] is not True:
                 st.error("ユーザー名またはパスワードが間違っています。")
         
         # 認証情報に関するメッセージは削除されています。
+        st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。") # 2行目のメッセージを復元
 else:
     # ログイン成功時のサイドバー表示
     with st.sidebar:
