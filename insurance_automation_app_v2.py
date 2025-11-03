@@ -32,7 +32,7 @@ st.markdown('<div class="main-header">🏥 保険業務自動化アシスタン�
 
 
 # ======================
-# ネイティブ認証ロジック
+# ネイティブ認証ロジック (最適化済み)
 # ======================
 
 # セッション状態の初期化
@@ -40,58 +40,67 @@ if "authentication_status" not in st.session_state:
     st.session_state["authentication_status"] = None
 if "name" not in st.session_state:
     st.session_state["name"] = None
+if "username" not in st.session_state: # username のセッション状態も初期化
+    st.session_state["username"] = None
 
-# Secretsからユーザー情報をフラットに読み込み、認証用の辞書に変換する (最終堅牢版)
 def load_and_map_secrets():
+    """Secretsからユーザー情報を読み込み、login_usernameをキーとする辞書を生成する"""
     try:
         auth_config = st.secrets["auth_users"]
         mapped_users = {}
         
-        # フラットなキー (例: admin_name, admin_password) を解析して辞書に再構成
-        usernames = set()
-        for key in auth_config.keys():
-            if '_name' in key:
-                usernames.add(key.replace('_name', ''))
+        # Secretsに定義された全キーから、ユーザー情報を構成するベース名 (例: 'admin') を抽出
+        base_users = set(key.rsplit('_', 1)[0] 
+                         for key in auth_config.keys() 
+                         if key.endswith(('_username', '_name', '_password')))
 
-        for user_key in usernames:
-            username = user_key
+        for user_key in base_users:
+            username_key = f"{user_key}_username"
             name_key = f"{user_key}_name"
             pass_key = f"{user_key}_password"
             
-            if name_key in auth_config and pass_key in auth_config:
-                mapped_users[username] = {
+            # 認証に必要な3つのキーがすべて存在するか確認
+            if all(k in auth_config for k in [username_key, name_key, pass_key]):
+                
+                # 認証辞書のキーには、実際にログイン時に使用する 'username' の値を使用
+                login_username = auth_config[username_key]
+
+                mapped_users[login_username] = {
                     "name": auth_config[name_key],
                     "password": auth_config[pass_key]
                 }
             
         if not mapped_users:
-             st.error("❌ Secretsファイルに有効なユーザー情報が定義されていません。`[auth_users]`セクションに `user_name` と `user_password` のペアがあることを確認してください。")
-             st.stop()
+            st.error("❌ Secretsファイルに有効なユーザー情報が定義されていません。`[auth_users]`セクションを確認してください。")
+            st.session_state["authentication_status"] = False
+            return {}
         return mapped_users
     except KeyError:
         st.error("❌ Secretsファイルから認証情報 (`auth_users`) を読み込めませんでした。`.streamlit/secrets.toml`の構造を確認してください。")
         st.session_state["authentication_status"] = False
-        st.stop()
+        return {}
+    except Exception as e:
+        st.error(f" Secretsロード中の予期せぬエラー: {e}")
+        st.session_state["authentication_status"] = False
         return {}
 
 # 認証情報辞書のロード (アプリケーション起動時に一度実行)
 AUTHENTICATION_USERS = load_and_map_secrets()
 
 def authenticate_user(username, password):
-    """ユーザー名と平文パスワードを検証する"""
+    """ユーザー名と平文パスワードを検証し、セッション状態を更新する"""
     
-    # 認証用辞書 (AUTHENTICATION_USERS) と照合
     if username in AUTHENTICATION_USERS:
         stored_password = AUTHENTICATION_USERS[username]["password"]
         
         if password == stored_password:
+            # 認証成功
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
             st.session_state["username"] = username
             return True
-        # else: パスワード不一致 -> 失敗
-    # else: ユーザー名が見つからない -> 失敗
     
+    # 認証失敗
     st.session_state["authentication_status"] = False
     st.session_state["name"] = None
     st.session_state["username"] = None
@@ -99,6 +108,7 @@ def authenticate_user(username, password):
 
 def logout():
     """ログアウト処理"""
+    # 関連するステートを None にリセット
     st.session_state["authentication_status"] = None
     st.session_state["name"] = None
     st.session_state["username"] = None
@@ -152,7 +162,7 @@ if st.session_state["authentication_status"]:
         if not GEMINI_API_KEY:
             st.error("❌ Secretsファイルに `GEMINI_API_KEY` が設定されていません。")
             st.stop()
-             
+            
         genai.configure(api_key=GEMINI_API_KEY)
         model = genai.GenerativeModel("gemini-2.5-flash")
     except KeyError:
@@ -199,18 +209,21 @@ if st.session_state["authentication_status"]:
 
             contents = [{"text": prompt}]
             
-            if text and len(text) > 100:
-                contents.append({"text": f"--- PDF TEXT START ---\n{text}"})
-            else:
-                st.warning(f"[{pdf_name}] テキスト抽出が不十分なため、画像として処理します。")
+            # テキストが不十分な場合は画像も追加
+            if not text or len(text) < 100:
+                st.warning(f"[{pdf_name}] テキスト抽出が不十分なため、画像として処理を試みます。")
                 try:
+                    # PDFを画像に変換して、最初の数ページをContentsに追加
                     images = convert_from_bytes(pdf_bytes)
                     for i, img in enumerate(images[:5]):
-                            contents.append(img)
-                            if i >= 2: break
+                        contents.append(img)
+                        if i >= 2: break # 最大3ページまでを画像として送る
                 except Exception as img_e:
                     st.error(f"[{pdf_name}] 画像変換に失敗しました: {img_e}")
-                    return None
+            
+            # テキストが抽出できた場合はテキストをContentsに追加
+            if text and len(text) >= 100:
+                contents.append({"text": f"--- PDF TEXT START ---\n{text}"})
 
             try:
                 response = model.generate_content(contents)
@@ -220,6 +233,7 @@ if st.session_state["authentication_status"]:
 
                 clean_text = response.text.strip()
                 if clean_text.startswith("```"):
+                    # コードブロック形式で返された場合の処理
                     clean_text = clean_text.replace("```json", "").replace("```", "").strip()
                 
                 return json.loads(clean_text)
