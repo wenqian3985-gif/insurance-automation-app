@@ -11,10 +11,8 @@ import time
 import logging
 import logging.handlers # ログファイルのローテーションハンドラを追加
 
-# パスワードのハッシュ化処理は使用しません (平文パスワードを使用)
-
 # ======================
-# ログ設定 (FileHandlerとConsoleHandlerを使用)
+# ログ設定 (堅牢性向上: StreamHandlerと強制フラッシュを追加)
 # ======================
 LOG_FILENAME = "app_usage.log"
 
@@ -29,6 +27,7 @@ if logger.hasHandlers():
 
 # フォーマッタ設定
 log_format = logging.Formatter(
+    # ユーザー情報 (%(user)s) は log_user_action の extra で渡される
     fmt='%(asctime)s - %(levelname)s - USER:%(user)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
@@ -44,18 +43,16 @@ try:
     file_handler.setFormatter(log_format)
     logger.addHandler(file_handler)
     
-    # ファイル書き込み成功をDEBUGログに出力
-    logger.debug(f"ログファイル('{LOG_FILENAME}')への書き込みを設定しました。", extra={'user': 'SYSTEM'})
-    
 except Exception as e:
-    # ファイル書き込みに失敗した場合
+    # ファイル書き込みに失敗した場合でも、システム警告としてターミナルに出力
+    # ただし、この時点でまだコンソールハンドラがないため、この警告は次のログ出力時にフラッシュされる
     logger.warning(f"ログファイル('{LOG_FILENAME}')への書き込み設定に失敗しました。エラー: {e}", extra={'user': 'SYSTEM'})
 
 # 2. Console Handler: コンソール（ターミナル）に常時出力する
-# これにより、ファイルへの書き込みが成功しても、コンソールでログを確認できる
+# Streamlit環境でログをリアルタイムで確認できるように、これを常に有効にします。
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(log_format)
-# デバッグ情報もコンソールに出力するため、レベルをDEBUGに設定
+# アプリのデバッグ情報もコンソールに出力するため、レベルをDEBUGに設定
 console_handler.setLevel(logging.DEBUG) 
 logger.addHandler(console_handler)
 
@@ -70,6 +67,14 @@ def log_user_action(action_description):
     # extra dictを使い、ロガーのフォーマットに 'user' フィールドを渡す
     logger.info(action_description, extra={'user': username})
 
+    # 【重要】強制フラッシュ: ログがバッファリングされるのを防ぎ、即座にファイルとターミナルに出力する
+    for handler in logger.handlers:
+        handler.flush()
+        
+# --- システム起動ログ ---
+# これにより、ロギングシステムが正しく動作しているか起動直後に確認できます。
+log_user_action("システム初期化開始: ロギングシステムをアクティブ化しました。")
+# ------------------------
 
 # ======================
 # 環境設定・デザイン
@@ -162,19 +167,19 @@ def authenticate_user(username, password):
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
             st.session_state["username"] = username
-            log_user_action("ログイン成功") # ★ ログ追加: ログイン成功
+            log_user_action("ログイン成功") # ★ ログ追加: ログイン成功 (フラッシュはlog_user_action内で実行)
             return True
     
     # 認証失敗
     st.session_state["authentication_status"] = False
     st.session_state["name"] = None
     st.session_state["username"] = None
-    log_user_action(f"ログイン失敗 (試行ユーザー: {username})") # ★ ログ追加: ログイン失敗
+    log_user_action(f"ログイン失敗 (試行ユーザー: {username})") # ★ ログ追加: ログイン失敗 (フラッシュはlog_user_action内で実行)
     return False
 
 def logout():
     """ログアウト処理"""
-    log_user_action("ログアウト") # ★ ログ追加: ログアウト
+    log_user_action("ログアウト") # ★ ログ追加: ログアウト (フラッシュはlog_user_action内で実行)
     # 関連するステートを None にリセット
     st.session_state["authentication_status"] = None
     st.session_state["name"] = None
@@ -202,8 +207,7 @@ if st.session_state["authentication_status"] is not True:
             else:
                 st.error("ユーザー名またはパスワードが間違っています。")
         
-        # 認証情報に関するメッセージは削除されています。
-        st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。") # 2行目のメッセージを復元
+        st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
 else:
     # ログイン成功時のサイドバー表示
     with st.sidebar:
@@ -282,7 +286,6 @@ if st.session_state["authentication_status"]:
             
             # テキストが不十分な場合は画像も追加
             if not text or len(text) < 100:
-                # st.warning(f"[{pdf_name}] テキスト抽出が不十分なため、画像として処理を試みます。") # メッセージはセッションステートに保存
                 st.session_state["extract_messages"].append(f"⚠️ {pdf.name}: テキスト抽出が不十分なため、画像として処理を試みました。")
                 try:
                     # PDFを画像に変換して、最初の数ページをContentsに追加
@@ -291,7 +294,6 @@ if st.session_state["authentication_status"]:
                         contents.append(img)
                         if i >= 2: break # 最大3ページまでを画像として送る
                 except Exception as img_e:
-                    # st.error(f"[{pdf.name}] 画像変換に失敗しました: {img_e}") # メッセージはセッションステートに保存
                     st.session_state["extract_messages"].append(f"❌ {pdf.name}: 画像変換に失敗しました - {img_e}")
             
             # テキストが抽出できた場合はテキストをContentsに追加
@@ -311,13 +313,9 @@ if st.session_state["authentication_status"]:
                 
                 return json.loads(clean_text)
             except json.JSONDecodeError:
-                # 応答がJSONではない場合
-                # st.error(f"[{pdf_name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...") # メッセージはセッションステートに保存
-                st.session_state["extract_messages"].append(f"❌ {pdf_name}: Gemini応答をJSON解析できませんでした。")
+                st.session_state["extract_messages"].append(f"❌ {pdf.name}: Gemini応答をJSON解析できませんでした。")
                 return None
             except Exception as e:
-                # その他のAPI呼び出しエラー
-                # st.error(f"[{pdf_name}] Gemini API呼び出しエラー: {e}") # メッセージはセッションステートに保存
                 st.session_state["extract_messages"].append(f"❌ {pdf.name}: Gemini API呼び出しエラー - {e}")
                 return None
 
@@ -371,7 +369,6 @@ if st.session_state["authentication_status"]:
         st.session_state["customer_file_name"] = None
     if "proposal_message" not in st.session_state: # 提案メッセージ保存用の新しいステートを追加
         st.session_state["proposal_message"] = ""
-    # st.session_state["extract_messages"] は冒頭で初期化済み
 
 
     st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード (任意)</div>', unsafe_allow_html=True)
