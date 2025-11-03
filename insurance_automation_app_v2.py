@@ -10,18 +10,19 @@ from PIL import Image
 import time
 import logging
 import logging.handlers # ログファイルのローテーションハンドラを追加
+import sys # sysモジュールを追加 (StreamHandlerのストリーム指定に利用)
 
 # ======================
-# ログ設定 (堅牢性向上: StreamHandlerと強制フラッシュを追加)
+# ログ設定 (強化版: StreamHandlerの確実な設定と強制フラッシュ)
 # ======================
 LOG_FILENAME = "app_usage.log"
 
 # ロガー設定
 logger = logging.getLogger(__name__)
-# アクションログはINFOレベルで取得
-logger.setLevel(logging.INFO)
+# ロガー全体のレベルを最低のDEBUGに設定
+logger.setLevel(logging.DEBUG) 
 
-# 既存のハンドラをクリア (二重ロギング防止)
+# 既存のハンドラをクリア (二重ロギング防止と設定の確実な上書き)
 if logger.hasHandlers():
     logger.handlers.clear()
 
@@ -41,26 +42,26 @@ try:
         encoding='utf-8'
     )
     file_handler.setFormatter(log_format)
+    # ファイルへの書き込みは INFO レベル以上
+    file_handler.setLevel(logging.INFO) 
     logger.addHandler(file_handler)
     
 except Exception as e:
-    # ファイル書き込みに失敗した場合でも、システム警告としてターミナルに出力
-    # ただし、この時点でまだコンソールハンドラがないため、この警告は次のログ出力時にフラッシュされる
+    # ファイル設定エラーは、ログ出力が確立した後にコンソールに出力される
+    # この警告は次に出力されるログとともにフラッシュされます
     logger.warning(f"ログファイル('{LOG_FILENAME}')への書き込み設定に失敗しました。エラー: {e}", extra={'user': 'SYSTEM'})
 
 # 2. Console Handler: コンソール（ターミナル）に常時出力する
-# Streamlit環境でログをリアルタイムで確認できるように、これを常に有効にします。
-console_handler = logging.StreamHandler()
+# StreamHandlerのストリームを sys.stdout に明示的に設定し、確実に出力されるようにします。
+console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(log_format)
-# アプリのデバッグ情報もコンソールに出力するため、レベルをDEBUGに設定
+# コンソールへの出力は DEBUG レベル以上 (アプリのデバッグ情報も出力)
 console_handler.setLevel(logging.DEBUG) 
 logger.addHandler(console_handler)
 
-
 def log_user_action(action_description):
     """
-    ユーザーのアクションをロギングするヘルパー関数
-    セッションステートからユーザー情報を取得
+    ユーザーのアクションをロギングし、強制フラッシュするヘルパー関数
     """
     # 認証済みユーザー名を取得。未認証の場合は 'UNAUTHENTICATED' を使用
     username = st.session_state.get("username", "UNAUTHENTICATED")
@@ -68,12 +69,13 @@ def log_user_action(action_description):
     logger.info(action_description, extra={'user': username})
 
     # 【重要】強制フラッシュ: ログがバッファリングされるのを防ぎ、即座にファイルとターミナルに出力する
+    # 特に Streamlit 環境では、この強制フラッシュがターミナル出力の鍵となることが多い
     for handler in logger.handlers:
         handler.flush()
         
 # --- システム起動ログ ---
 # これにより、ロギングシステムが正しく動作しているか起動直後に確認できます。
-log_user_action("システム初期化開始: ロギングシステムをアクティブ化しました。")
+log_user_action("システム初期化完了: ロギングシステムをアクティブ化しました。")
 # ------------------------
 
 # ======================
