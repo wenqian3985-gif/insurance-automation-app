@@ -8,20 +8,22 @@ import google.generativeai as genai
 from pdf2image import convert_from_bytes
 from PIL import Image
 import time
-import hashlib
-import sys
+# hashlibのインポートを削除
+
 
 # =========================================================================
-# 【デバッグ用】SECRETS値をコード内にハードコーディング
-# ※ 認証が成功したら、元のst.secretsを使うバージョンに戻してください
+# 【デバッグ用】SECRETS値をコード内にハードコーディングし、パスワードを平文で保存
+# ※ 認証が成功したら、元のst.secretsとハッシュを使うバージョンに戻してください
 # =========================================================================
 DEBUG_GEMINI_API_KEY = "AIzaSyCebpuZmUui7d01KR7aJIVfg-YLhqu3Mec" # あなたのAPIキーに置き換えてください
-# パスワード "admin_pass" のSHA256ハッシュ
-ADMIN_PASS_HASH = "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8831f65df05204c30"
+# パスワードは平文: "admin_pass"
+DEBUG_PASSWORD = "admin_pass"
 
 DEBUG_AUTHENTICATION_USERS = {
-    "admin": {"name": "管理者", "password_hash": ADMIN_PASS_HASH},
-    "user1": {"name": "ユーザー１", "password_hash": ADMIN_PASS_HASH}
+    # ユーザー名: admin (平文パスワード: admin_pass)
+    "admin": {"name": "管理者", "password": DEBUG_PASSWORD},
+    # ユーザー名: user1 (平文パスワード: admin_pass)
+    "user1": {"name": "ユーザー１", "password": DEBUG_PASSWORD}
 }
 # =========================================================================
 
@@ -57,28 +59,26 @@ if "authentication_status" not in st.session_state:
 if "name" not in st.session_state:
     st.session_state["name"] = None
 
-def hash_password(password):
-    """パスワードをSHA256でハッシュ化する"""
-    return hashlib.sha256(password.encode()).hexdigest()
+# パスワードハッシュ化関数は削除
 
 # デバッグのため、直接ハードコーディングされたユーザーリストを使用
 AUTHENTICATION_USERS = DEBUG_AUTHENTICATION_USERS
 
 
 def authenticate_user(username, password):
-    """ユーザー名とパスワードを検証する"""
-    input_hash = hash_password(password) # 入力パスワードをハッシュ化
+    """ユーザー名と平文パスワードを検証する"""
     
     # ハードコーディングされたユーザー情報と照合
     if username in AUTHENTICATION_USERS:
-        stored_hash = AUTHENTICATION_USERS[username]["password_hash"]
+        stored_password = AUTHENTICATION_USERS[username]["password"] # 平文パスワードを取得
         
-        if input_hash == stored_hash:
+        # 入力パスワードと保存されている平文パスワードを直接比較
+        if password == stored_password: 
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
             st.session_state["username"] = username
             return True
-        # else: ハッシュ不一致 -> 失敗
+        # else: パスワード不一致 -> 失敗
     # else: ユーザー名が見つからない -> 失敗
     
     st.session_state["authentication_status"] = False
@@ -115,7 +115,7 @@ if st.session_state["authentication_status"] is not True:
                 st.error("ユーザー名またはパスワードが間違っています。")
         
         # Secretsエラーの可能性を排除するため、デバッグ中であることを明示
-        st.warning("⚠️ 現在、認証情報はPythonコード内にハードコーディングされています。")
+        st.warning("⚠️ 現在、認証情報はPythonコード内に平文パスワードとしてハードコーディングされています。")
         st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
 else:
     # ログイン成功時のサイドバー表示
