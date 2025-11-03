@@ -8,25 +8,7 @@ import google.generativeai as genai
 from pdf2image import convert_from_bytes
 from PIL import Image
 import time
-# hashlibのインポートを削除
-
-
-# =========================================================================
-# 【デバッグ用】SECRETS値をコード内にハードコーディングし、パスワードを平文で保存
-# ※ 認証が成功したら、元のst.secretsとハッシュを使うバージョンに戻してください
-# =========================================================================
-DEBUG_GEMINI_API_KEY = "AIzaSyCebpuZmUui7d01KR7aJIVfg-YLhqu3Mec" # あなたのAPIキーに置き換えてください
-# パスワードは平文: "admin_pass"
-DEBUG_PASSWORD = "admin_pass"
-
-DEBUG_AUTHENTICATION_USERS = {
-    # ユーザー名: admin (平文パスワード: admin_pass)
-    "admin": {"name": "管理者", "password": DEBUG_PASSWORD},
-    # ユーザー名: user1 (平文パスワード: admin_pass)
-    "user1": {"name": "ユーザー１", "password": DEBUG_PASSWORD}
-}
-# =========================================================================
-
+import hashlib # パスワードのハッシュ化に使用
 
 # ======================
 # 環境設定・デザイン
@@ -59,26 +41,36 @@ if "authentication_status" not in st.session_state:
 if "name" not in st.session_state:
     st.session_state["name"] = None
 
-# パスワードハッシュ化関数は削除
+def hash_password(password):
+    """パスワードをSHA256でハッシュ化する"""
+    return hashlib.sha256(password.encode()).hexdigest()
 
-# デバッグのため、直接ハードコーディングされたユーザーリストを使用
-AUTHENTICATION_USERS = DEBUG_AUTHENTICATION_USERS
+# 認証情報の取得とチェック
+try:
+    # Secretsファイルから認証情報を読み込む
+    AUTHENTICATION_USERS = st.secrets["auth_users"]
+except (KeyError, AttributeError):
+    # Secretsファイルが存在しないか、キーが見つからない場合のフォールバック
+    st.error("❌ Secretsファイルから認証情報 `auth_users` を読み込めませんでした。`.streamlit/secrets.toml`を確認してください。")
+    st.session_state["authentication_status"] = False
+    st.stop()
 
 
 def authenticate_user(username, password):
-    """ユーザー名と平文パスワードを検証する"""
+    """ユーザー名とパスワードを検証する"""
+    input_hash = hash_password(password) # 入力パスワードをハッシュ化
     
-    # ハードコーディングされたユーザー情報と照合
+    # Secretsから読み込んだユーザー情報と照合
     if username in AUTHENTICATION_USERS:
-        stored_password = AUTHENTICATION_USERS[username]["password"] # 平文パスワードを取得
+        stored_hash = AUTHENTICATION_USERS[username]["password_hash"]
         
-        # 入力パスワードと保存されている平文パスワードを直接比較
-        if password == stored_password: 
+        # 保存されているハッシュと比較
+        if input_hash == stored_hash:
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
             st.session_state["username"] = username
             return True
-        # else: パスワード不一致 -> 失敗
+        # else: ハッシュ不一致 -> 失敗
     # else: ユーザー名が見つからない -> 失敗
     
     st.session_state["authentication_status"] = False
@@ -114,8 +106,7 @@ if st.session_state["authentication_status"] is not True:
             else:
                 st.error("ユーザー名またはパスワードが間違っています。")
         
-        # Secretsエラーの可能性を排除するため、デバッグ中であることを明示
-        st.warning("⚠️ 現在、認証情報はPythonコード内に平文パスワードとしてハードコーディングされています。")
+        st.info("認証情報は `.streamlit/secrets.toml` から読み込まれています。")
         st.info("認証が完了するまで、アプリケーションのメイン機能は表示されません。")
 else:
     # ログイン成功時のサイドバー表示
@@ -133,18 +124,21 @@ if st.session_state["authentication_status"]:
     st.subheader("📄 保険自動化システム メイン機能")
 
     # ======================
-    # GEMINI 初期化 (デバッグ用APIキーを使用)
+    # GEMINI 初期化 (SecretsからAPIキーを使用)
     # ======================
     try:
-        # デバッグ用APIキーを使用
-        GEMINI_API_KEY = DEBUG_GEMINI_API_KEY
+        # SecretsファイルからAPIキーを読み込む
+        GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
         
         if not GEMINI_API_KEY:
-            st.error("❌ GEMINI APIキーが設定されていません。コード内の`DEBUG_GEMINI_API_KEY`を確認してください。")
+            st.error("❌ Secretsファイルに `GEMINI_API_KEY` が設定されていません。")
             st.stop()
              
         genai.configure(api_key=GEMINI_API_KEY)
         model = genai.GenerativeModel("gemini-2.5-flash")
+    except KeyError:
+        st.error("❌ SecretsファイルからAPIキーを読み込めませんでした。`GEMINI_API_KEY`キーを確認してください。")
+        st.stop()
     except Exception as e:
         st.error(f"❌ Gemini初期化エラー: {e}")
         st.stop()
@@ -295,6 +289,7 @@ if st.session_state["authentication_status"]:
         @st.cache_data
         def to_excel_bytes(df):
             output = io.BytesIO()
+            # エンジン名を "openypxl" から正しい "openpyxl" に修正
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 df.to_excel(writer, index=False, sheet_name="見積情報比較表")
             return output.getvalue()
