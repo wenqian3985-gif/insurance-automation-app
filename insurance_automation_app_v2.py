@@ -368,12 +368,11 @@ if st.session_state["authentication_status"]:
 
         excel_data = to_excel_bytes(st.session_state["comparison_df"])
         
-        # ダウンロードファイル名設定 (要件2: アップロードファイル名を使用)
+        # ダウンロードファイル名設定 (ユーザーの要求: アップロードファイル名と同一、またはデフォルト)
         download_filename = "見積情報比較表_抽出結果.xlsx"
         if st.session_state.get("customer_file_name"):
-            # 拡張子を除去して "_抽出結果.xlsx" を追加
-            base_name = os.path.splitext(st.session_state["customer_file_name"])[0]
-            download_filename = f"{base_name}_抽出結果.xlsx"
+            # アップロードファイル名をそのまま使用
+            download_filename = st.session_state["customer_file_name"]
             
         st.download_button(
             "📥 Excelでダウンロード",
