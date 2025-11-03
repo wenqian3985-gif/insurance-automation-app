@@ -14,12 +14,13 @@ import logging.handlers # ログファイルのローテーションハンドラ
 # パスワードのハッシュ化処理は使用しません (平文パスワードを使用)
 
 # ======================
-# ログ設定 (FileHandlerを使用)
+# ログ設定 (FileHandlerとConsoleHandlerを使用)
 # ======================
 LOG_FILENAME = "app_usage.log"
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+# アクションログはINFOレベルで取得
 logger.setLevel(logging.INFO)
 
 # 既存のハンドラをクリア (二重ロギング防止)
@@ -32,7 +33,7 @@ log_format = logging.Formatter(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
-# File Handler: ログファイルに書き込む (最大10MB、バックアップファイル5つ)
+# 1. File Handler: ログファイルに書き込む (最大10MB、バックアップファイル5つ)
 try:
     file_handler = logging.handlers.RotatingFileHandler(
         LOG_FILENAME, 
@@ -42,14 +43,21 @@ try:
     )
     file_handler.setFormatter(log_format)
     logger.addHandler(file_handler)
-    # ↓ この時点で、ファイルはサーバー内部に作成されています。
+    
+    # ファイル書き込み成功をDEBUGログに出力
+    logger.debug(f"ログファイル('{LOG_FILENAME}')への書き込みを設定しました。", extra={'user': 'SYSTEM'})
+    
 except Exception as e:
-    # ファイル書き込みに失敗した場合（読み取り専用ファイルシステムの場合）
-    # 代替としてConsole Handlerを追加し、Streamlitの標準出力にもログを残す
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(log_format)
-    logger.addHandler(console_handler)
-    logger.warning(f"ログファイル('{LOG_FILENAME}')への書き込みができません。コンソールにのみ出力します。エラー: {e}")
+    # ファイル書き込みに失敗した場合
+    logger.warning(f"ログファイル('{LOG_FILENAME}')への書き込み設定に失敗しました。エラー: {e}", extra={'user': 'SYSTEM'})
+
+# 2. Console Handler: コンソール（ターミナル）に常時出力する
+# これにより、ファイルへの書き込みが成功しても、コンソールでログを確認できる
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_format)
+# デバッグ情報もコンソールに出力するため、レベルをDEBUGに設定
+console_handler.setLevel(logging.DEBUG) 
+logger.addHandler(console_handler)
 
 
 def log_user_action(action_description):
@@ -305,7 +313,7 @@ if st.session_state["authentication_status"]:
             except json.JSONDecodeError:
                 # 応答がJSONではない場合
                 # st.error(f"[{pdf_name}] Geminiからの応答をJSONとして解析できませんでした。応答: {response.text[:100]}...") # メッセージはセッションステートに保存
-                st.session_state["extract_messages"].append(f"❌ {pdf.name}: Gemini応答をJSON解析できませんでした。")
+                st.session_state["extract_messages"].append(f"❌ {pdf_name}: Gemini応答をJSON解析できませんでした。")
                 return None
             except Exception as e:
                 # その他のAPI呼び出しエラー
