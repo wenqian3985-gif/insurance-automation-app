@@ -18,13 +18,16 @@ protobuf>=4.25,<4.28
 google-api-core==2.19.1
 
 # パスワード機能
-streamlit-authenticator
-bcrypt
-pyyaml
+# streamlit-authenticator
+# bcrypt
+# pyyaml
 
-streamlit-authenticator==0.4.2
-extra-streamlit-components==0.1.81
+# streamlit-authenticator==0.4.2
+# extra-streamlit-components==0.1.81
 
 #ログ転記用Google Cloud storage
-gcsfs
-st-files-connection
+ time
+ logging
+ logging.handlers
+ gcsfs
+ st-files-connection
