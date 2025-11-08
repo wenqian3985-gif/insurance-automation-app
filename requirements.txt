@@ -32,3 +32,4 @@ google-api-core==2.19.1
  gcsfs
  st-files-connection
  sys
+ datetime

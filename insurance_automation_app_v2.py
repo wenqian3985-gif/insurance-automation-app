@@ -9,74 +9,112 @@ from pdf2image import convert_from_bytes
 from PIL import Image
 import time
 import logging
-import logging.handlers
+# GCS関連のライブラリをインポート
+from google.cloud import storage
+from google.oauth2 import service_account
 import sys
+import datetime # ログのタイムスタンプ用
 
 # ======================
-# ログ設定 (強化版: StreamHandlerの確実な設定と強制フラッシュ)
+# GCSログ設定
 # ======================
-LOG_FILENAME = "app_usage.log"
 
-# ロガー設定
+# st.cache_resourceを使い、GCSクライアントを一度だけ初期化
+@st.cache_resource
+def init_gcs_client():
+    """
+    st.secretsからサービスアカウント情報を読み込み、GCSクライアントを初期化する
+    """
+    try:
+        # st.secretsからサービスアカウントの認証情報を直接読み込む
+        gcs_credentials_info = st.secrets["gcs_service_account"]
+        credentials = service_account.Credentials.from_service_account_info(gcs_credentials_info)
+        client = storage.Client(credentials=credentials)
+        
+        # バケット名もst.secretsから取得
+        bucket_name = st.secrets["gcs_config"]["bucket_name"]
+        # バケットが存在するか確認 (権限チェック)
+        client.get_bucket(bucket_name) 
+        
+        return client
+    except KeyError:
+        st.error("❌ GCS認証情報またはバケット名がsecrets.tomlに設定されていません。")
+        return None
+    except Exception as e:
+        st.error(f"❌ GCSクライアントの初期化に失敗しました: {e}")
+        return None
+
+# GCSクライアントを初期化
+gcs_client = init_gcs_client()
+
+# ======================
+# コンソールログ設定 (デバッグ用)
+# ======================
+
+# ロガー設定 (コンソール出力用)
 logger = logging.getLogger(__name__)
-# ロガー全体のレベルを最低のDEBUGに設定
 logger.setLevel(logging.DEBUG) 
 
-# 既存のハンドラをクリア (二重ロギング防止と設定の確実な上書き)
-if logger.hasHandlers():
-    logger.handlers.clear()
-
-# フォーマッタ設定
-log_format = logging.Formatter(
-    # ユーザー情報 (%(user)s) は log_user_action の extra で渡される
-    fmt='%(asctime)s - %(levelname)s - USER:%(user)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-
-# 1. File Handler: ログファイルに書き込む (最大10MB、バックアップファイル5つ)
-try:
-    file_handler = logging.handlers.RotatingFileHandler(
-        LOG_FILENAME, 
-        maxBytes=10*1024*1024, # 10MB
-        backupCount=5,
-        encoding='utf-8'
+if not logger.hasHandlers(): # ハンドラが未設定の場合のみ追加
+    # フォーマッタ設定
+    log_format = logging.Formatter(
+        fmt='%(asctime)s - %(levelname)s - USER:%(user)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
     )
-    file_handler.setFormatter(log_format)
-    # ファイルへの書き込みは INFO レベル以上
-    file_handler.setLevel(logging.INFO) 
-    logger.addHandler(file_handler)
     
-    # ログファイルハンドラのステータスをセッションに保存 (UIからは削除)
-    st.session_state["log_file_status"] = "✅ ログファイル転記設定は有効です" 
-
-except Exception as e:
-    # ログファイル書き込みが失敗した場合、エラーメッセージをセッションに保存 (UIからは削除)
-    st.session_state["log_file_status"] = f"❌ ログファイル転記エラー: {e} (環境のファイル書き込み権限を確認してください)"
-    logger.error(f"ログファイル('{LOG_FILENAME}')への書き込み設定に失敗しました。エラー: {e}", extra={'user': 'SYSTEM'})
-
-
-# 2. Console Handler: コンソール（ターミナル）に常時出力する
-# StreamHandlerのストリームを sys.stdout に明示的に設定し、確実に出力されるようにします。
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(log_format)
-# コンソールへの出力は DEBUG レベル以上 (アプリのデバッグ情報も出力)
-console_handler.setLevel(logging.DEBUG) 
-logger.addHandler(console_handler)
+    # Console Handler: コンソール（ターミナル）に常時出力する
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(log_format)
+    console_handler.setLevel(logging.DEBUG) 
+    logger.addHandler(console_handler)
 
 def log_user_action(action_description):
     """
-    ユーザーのアクションをロギングし、強制フラッシュするヘルパー関数
-    - INFOレベルで記録され、ファイルとコンソールの両方に出力される。
+    ユーザーのアクションをロギングするヘルパー関数
+    1. コンソール (manage app) に出力
+    2. GCSバケットのログファイルに追記
     """
+    
     # 認証済みユーザー名を取得。未認証の場合は 'UNAUTHENTICATED' を使用
     username = st.session_state.get("username", "UNAUTHENTICATED")
+    
+    # タイムスタンプ付きのログメッセージを作成
+    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_message = f"{timestamp} - INFO - USER:{username} - {action_description}\n" # 末尾に改行を追加
+
+    # --- 1. コンソールへの出力 (即時) ---
     # extra dictを使い、ロガーのフォーマットに 'user' フィールドを渡す
     logger.info(action_description, extra={'user': username})
-
-    # 【重要】強制フラッシュ: ログがバッファリングされるのを防ぎ、即座にファイルとターミナルに出力する
     for handler in logger.handlers:
         handler.flush()
-        
+
+    # --- 2. GCSへの書き込み (GCSクライアントが正常に初期化されている場合のみ) ---
+    if gcs_client:
+        try:
+            # st.secretsからバケット名とファイル名を取得
+            bucket_name = st.secrets["gcs_config"]["bucket_name"]
+            log_file_name = st.secrets["gcs_config"]["log_file_name"]
+            
+            bucket = gcs_client.bucket(bucket_name)
+            blob = bucket.blob(log_file_name)
+
+            # GCSの「追記」ロジック:
+            # A. 既存のログファイルをダウンロード (存在しない場合は空として扱う)
+            if blob.exists():
+                existing_log = blob.download_as_string().decode('utf-8')
+            else:
+                existing_log = ""
+                
+            # B. 新しいログメッセージを結合
+            updated_log = existing_log + log_message
+            
+            # C. 結合した内容でファイルをアップロード (上書き)
+            blob.upload_from_string(updated_log, content_type='text/plain; charset=utf-8')
+
+        except Exception as e:
+            # GCSへの書き込み失敗をコンソールに出力 (アプリは停止させない)
+            logger.error(f"GCSログファイルへの書き込みに失敗しました: {e}", extra={'user': 'SYSTEM'})
+
 # --- システム起動ログ (ファイルには記録せず、ターミナルのみに出力) ---
 logger.debug("システム初期化完了: ロギングシステムをアクティブ化しました。", extra={'user': 'SYSTEM'})
 # ------------------------
@@ -115,9 +153,7 @@ if "username" not in st.session_state:
     st.session_state["username"] = None
 if "extract_messages" not in st.session_state:
     st.session_state["extract_messages"] = []
-# ログファイルステータス用のセッションステートを初期化 (UIには表示しないが内部で保持)
-if "log_file_status" not in st.session_state:
-     st.session_state["log_file_status"] = "🔄 ログ設定を確認中..."
+# ログファイルステータス用のセッションステートは不要になったため削除
 
 
 def load_and_map_secrets():
@@ -175,19 +211,19 @@ def authenticate_user(username, password):
             st.session_state["authentication_status"] = True
             st.session_state["name"] = AUTHENTICATION_USERS[username]["name"]
             st.session_state["username"] = username
-            log_user_action("ログイン成功") # ★ ログ追加: ログイン成功
+            log_user_action("ログイン成功") # ★ ログ追加: ログイン成功 (GCSに転記)
             return True
     
     # 認証失敗
     st.session_state["authentication_status"] = False
     st.session_state["name"] = None
     st.session_state["username"] = None
-    log_user_action(f"ログイン失敗 (試行ユーザー: {username})") # ★ ログ追加: ログイン失敗
+    log_user_action(f"ログイン失敗 (試行ユーザー: {username})") # ★ ログ追加: ログイン失敗 (GCSに転記)
     return False
 
 def logout():
     """ログアウト処理"""
-    log_user_action("ログアウト") # ★ ログ追加: ログアウト
+    log_user_action("ログアウト") # ★ ログ追加: ログアウト (GCSに転記)
     # 関連するステートを None にリセット
     st.session_state["authentication_status"] = None
     st.session_state["name"] = None
@@ -396,7 +432,7 @@ if st.session_state["authentication_status"]:
             st.session_state["customer_df"] = df_customer # 既存データを保存 (要件3)
             
             st.success("✅ 顧客情報ファイルを読み込み、列名を抽出フィールドとして設定しました。")
-            log_user_action(f"顧客情報ファイルアップロード: {customer_file.name}") # ★ ログ追加: Excelファイルアップロード
+            log_user_action(f"顧客情報ファイルアップロード: {customer_file.name}") # ★ ログ追加: Excelファイルアップロード (GCSに転記)
             st.dataframe(df_customer, use_container_width=True)
 
         except Exception as e:
@@ -422,7 +458,7 @@ if st.session_state["authentication_status"]:
     uploaded_pdfs = st.file_uploader("PDFファイルをアップロード（複数可）", type=["pdf"], accept_multiple_files=True, key="pdf_uploader")
     
     if uploaded_pdfs and st.button("PDFから情報を抽出", key="extract_button"):
-        log_user_action(f"PDF抽出開始: {len(uploaded_pdfs)}件のファイル") # ★ ログ追加: PDF抽出開始
+        log_user_action(f"PDF抽出開始: {len(uploaded_pdfs)}件のファイル") # ★ ログ追加: PDF抽出開始 (GCSに転記)
         
         # 抽出ボタンが押されたら、以前の提案メッセージと抽出メッセージをクリア
         st.session_state["proposal_message"] = "" 
@@ -491,7 +527,7 @@ if st.session_state["authentication_status"]:
             df_final = df_final.astype(str)
                 
             st.session_state["comparison_df"] = df_final
-            log_user_action(f"PDF抽出完了: {len(results)}件のレコードを比較表に追加") # ★ ログ追加: PDF抽出完了
+            log_user_action(f"PDF抽出完了: {len(results)}件のレコードを比較表に追加") # ★ ログ追加: PDF抽出完了 (GCSに転記)
         else:
             if not st.session_state["extract_messages"]:
                 st.session_state["extract_messages"].append("PDFから情報を抽出できませんでした。処理ログを確認してください。")
@@ -536,7 +572,7 @@ if st.session_state["authentication_status"]:
             data=excel_data,
             file_name=download_filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            on_click=lambda: log_user_action(f"抽出結果ダウンロード: {download_filename}") # ★ ログ追加: ダウンロード
+            on_click=lambda: log_user_action(f"抽出結果ダウンロード: {download_filename}") # ★ ログ追加: ダウンロード (GCSに転記)
         )
     else:
         st.info("まだ抽出結果はありません。")
@@ -546,11 +582,11 @@ if st.session_state["authentication_status"]:
     if not st.session_state["comparison_df"].empty:
         
         if st.button("提案メッセージを作成・表示", key="analyze_button"):
-            log_user_action("提案メッセージ生成開始") # ★ ログ追加: 提案生成開始
+            log_user_action("提案メッセージ生成開始") # ★ ログ追加: 提案生成開始 (GCSに転記)
             # 提案メッセージを生成し、セッションに保存
             proposal = analyze_and_generate_proposal(st.session_state["comparison_df"])
             st.session_state["proposal_message"] = proposal
-            log_user_action("提案メッセージ生成完了") # ★ ログ追加: 提案生成完了
+            log_user_action("提案メッセージ生成完了") # ★ ログ追加: 提案生成完了 (GCSに転記)
             
         if st.session_state["proposal_message"]:
             st.markdown("---")
