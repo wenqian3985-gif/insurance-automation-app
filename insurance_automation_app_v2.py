@@ -32,7 +32,7 @@ def init_gcs_client():
         client = storage.Client(credentials=credentials)
         
         # バケット名もst.secretsから取得
-        bucket_name = st.secrets["gcs_config"]["bucket_name"]
+        bucket_name = st.secrets["gcs_config"]["bmy-streamlit-log-bucket"]
         # バケットが存在するか確認 (権限チェック)
         client.get_bucket(bucket_name) 
         
