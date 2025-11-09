@@ -18,5 +18,5 @@ protobuf>=4.25,<4.28
 google-api-core==2.19.1
 
 # GCSへの接続と認証に必要
-google-cloud-storage
-google-oauth2
+streamlit- google-oauth2
+streamlit- google-cloud-storage
