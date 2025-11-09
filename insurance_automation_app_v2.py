@@ -32,14 +32,15 @@ def init_gcs_client():
         client = storage.Client(credentials=credentials)
         
         # バケット名もst.secretsから取得
-        # NOTE: このキー名がsecrets.tomlに存在することを確認してください。
-        bucket_name = st.secrets["gcs_config"]["bmy-streamlit-log-bucket"] 
+        # secrets.tomlの [gcs_config] セクションで定義されている 'bucket_name' キーを使用します。
+        bucket_name = st.secrets["gcs_config"]["bucket_name"] 
         # バケットが存在するか確認 (権限チェック)
         client.get_bucket(bucket_name)
         
         return client
-    except KeyError:
-        st.error("❌ GCS認証情報またはバケット名がsecrets.tomlに設定されていません。")
+    except KeyError as ke:
+        # KeyErrorが発生した場合、どのキーが存在しないかを出力に追加
+        st.error(f"❌ GCS認証情報またはバケット名がsecrets.tomlに設定されていません。不足キー: {ke}")
         return None
     except Exception as e:
         st.error(f"❌ GCSクライアントの初期化に失敗しました: {e}")
@@ -93,9 +94,7 @@ def log_user_action(action_description):
     if gcs_client:
         try:
             # st.secretsからバケット名とファイル名を取得
-            # NOTE: init_gcs_client と log_user_action で異なるキー名が使用されています。
-            # log_user_actionでは 'bucket_name' を、init_gcs_clientでは 'bmy-streamlit-log-bucket' を使用。
-            # secrets.tomlでこの2つのキーが適切に設定されていることを確認してください。
+            # log_user_actionでは 'bucket_name' を使用しており、init_gcs_clientの修正によりキー名が統一されました。
             bucket_name = st.secrets["gcs_config"]["bucket_name"] 
             log_file_name = st.secrets["gcs_config"]["log_file_name"]
             
