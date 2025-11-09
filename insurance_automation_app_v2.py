@@ -16,6 +16,11 @@ import sys
 import datetime # ログのタイムスタンプ用
 
 # ======================
+# JSTタイムゾーン定義 (UTC+9)
+# ======================
+JST = datetime.timezone(datetime.timedelta(hours=+9), 'JST')
+
+# ======================
 # GCSログ設定
 # ======================
 
@@ -81,7 +86,10 @@ def log_user_action(action_description):
     username = st.session_state.get("username", "UNAUTHENTICATED")
     
     # タイムスタンプ付きのログメッセージを作成
-    timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # ★ 修正: UTC時刻を取得し、JSTに変換してタイムスタンプを作成
+    utc_time = datetime.datetime.now(datetime.timezone.utc)
+    jst_time = utc_time.astimezone(JST)
+    timestamp = jst_time.strftime('%Y-%m-%d %H:%M:%S')
     log_message = f"{timestamp} - INFO - USER:{username} - {action_description}\n" # 末尾に改行を追加
 
     # --- 1. コンソールへの出力 (即時) ---
