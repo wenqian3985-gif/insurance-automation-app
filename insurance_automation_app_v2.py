@@ -12,7 +12,7 @@ import logging
 # GCS関連のライブラリをインポート
 from google.cloud import storage
 from google.auth.exceptions import DefaultCredentialsError
-from google.auth import default
+from google.auth import service_account
 import sys
 import datetime # ログのタイムスタンプ用
 
