@@ -32,13 +32,17 @@ def init_gcs_client():
         client = storage.Client(credentials=credentials)
         
         # バケット名もst.secretsから取得
-        bucket_name = st.secrets["gcs_config"]["bmy-streamlit-log-bucket"]
+        # ▼▼▼【修正点】▼▼▼
+        # 'bmy-streamlit-log-bucket' というキーではなく 'bucket_name' キーから読み込むよう統一
+        bucket_name = st.secrets["gcs_config"]["bucket_name"]
+        # ▲▲▲【修正点】▲▲▲
+        
         # バケットが存在するか確認 (権限チェック)
         client.get_bucket(bucket_name) 
         
         return client
-    except KeyError:
-        st.error("❌ GCS認証情報またはバケット名がsecrets.tomlに設定されていません。")
+    except KeyError as e:
+        st.error(f"❌ GCS認証情報またはバケット名がsecrets.tomlに設定されていません。 (不足キー: {e})")
         return None
     except Exception as e:
         st.error(f"❌ GCSクライアントの初期化に失敗しました: {e}")
@@ -284,7 +288,7 @@ if st.session_state["authentication_status"]:
             st.stop()
             
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-1.5-flash") # 1.5-flashに変更（もし2.5-flashがエラーになる場合）
     except KeyError:
         st.error("❌ SecretsファイルからAPIキーを読み込めませんでした。`GEMINI_API_KEY`キーを確認してください。")
         st.stop()
@@ -518,7 +522,7 @@ if st.session_state["authentication_status"]:
                 # 順序を設定: 抽出フィールド + ファイル名 (要件1: ファイル名がfieldsにない場合は最後に追加)
                 column_order = [f for f in fields if f in df_extracted.columns]
                 if "ファイル名" in df_extracted.columns and "ファイル名" not in column_order:
-                     column_order.append("ファイル名")
+                        column_order.append("ファイル名")
 
                 df_final = df_extracted.reindex(columns=column_order)
             
@@ -602,4 +606,4 @@ if st.session_state["authentication_status"]:
 
 
     st.markdown("---")
-    st.markdown("**保険業務自動化アシスタント** | Streamlit + Gemini 2.5 Flash")
+    st.markdown("**保険業務自動化アシスタント** | Streamlit + Gemini 1.5 Flash")
