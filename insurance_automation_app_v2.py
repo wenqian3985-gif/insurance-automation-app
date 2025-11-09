@@ -11,8 +11,7 @@ import time
 import logging
 # GCS関連のライブラリをインポート
 from google.cloud import storage
-from google.auth.exceptions import DefaultCredentialsError
-from google.auth import default
+from google.oauth2 import service_account
 import sys
 import datetime # ログのタイムスタンプ用
 
@@ -33,17 +32,14 @@ def init_gcs_client():
         client = storage.Client(credentials=credentials)
         
         # バケット名もst.secretsから取得
-        # ▼▼▼【修正点】▼▼▼
-        # 'bmy-streamlit-log-bucket' というキーではなく 'bucket_name' キーから読み込むよう統一
-        bucket_name = st.secrets["gcs_config"]["bucket_name"]
-        # ▲▲▲【修正点】▲▲▲
-        
+        # NOTE: このキー名がsecrets.tomlに存在することを確認してください。
+        bucket_name = st.secrets["gcs_config"]["bmy-streamlit-log-bucket"] 
         # バケットが存在するか確認 (権限チェック)
-        client.get_bucket(bucket_name) 
+        client.get_bucket(bucket_name)
         
         return client
-    except KeyError as e:
-        st.error(f"❌ GCS認証情報またはバケット名がsecrets.tomlに設定されていません。 (不足キー: {e})")
+    except KeyError:
+        st.error("❌ GCS認証情報またはバケット名がsecrets.tomlに設定されていません。")
         return None
     except Exception as e:
         st.error(f"❌ GCSクライアントの初期化に失敗しました: {e}")
@@ -58,7 +54,7 @@ gcs_client = init_gcs_client()
 
 # ロガー設定 (コンソール出力用)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG) 
+logger.setLevel(logging.DEBUG)
 
 if not logger.hasHandlers(): # ハンドラが未設定の場合のみ追加
     # フォーマッタ設定
@@ -70,7 +66,7 @@ if not logger.hasHandlers(): # ハンドラが未設定の場合のみ追加
     # Console Handler: コンソール（ターミナル）に常時出力する
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(log_format)
-    console_handler.setLevel(logging.DEBUG) 
+    console_handler.setLevel(logging.DEBUG)
     logger.addHandler(console_handler)
 
 def log_user_action(action_description):
@@ -97,7 +93,10 @@ def log_user_action(action_description):
     if gcs_client:
         try:
             # st.secretsからバケット名とファイル名を取得
-            bucket_name = st.secrets["gcs_config"]["bucket_name"]
+            # NOTE: init_gcs_client と log_user_action で異なるキー名が使用されています。
+            # log_user_actionでは 'bucket_name' を、init_gcs_clientでは 'bmy-streamlit-log-bucket' を使用。
+            # secrets.tomlでこの2つのキーが適切に設定されていることを確認してください。
+            bucket_name = st.secrets["gcs_config"]["bucket_name"] 
             log_file_name = st.secrets["gcs_config"]["log_file_name"]
             
             bucket = gcs_client.bucket(bucket_name)
@@ -168,9 +167,9 @@ def load_and_map_secrets():
         mapped_users = {}
         
         # Secretsに定義された全キーから、ユーザー情報を構成するベース名 (例: 'admin') を抽出
-        base_users = set(key.rsplit('_', 1)[0] 
-                         for key in auth_config.keys() 
-                         if key.endswith(('_username', '_name', '_password')))
+        base_users = set(key.rsplit('_', 1)[0]
+                             for key in auth_config.keys()
+                             if key.endswith(('_username', '_name', '_password')))
 
         for user_key in base_users:
             username_key = f"{user_key}_username"
@@ -289,7 +288,7 @@ if st.session_state["authentication_status"]:
             st.stop()
             
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash") # 1.5-flashに変更（もし2.5-flashがエラーになる場合）
+        model = genai.GenerativeModel("gemini-2.5-flash")
     except KeyError:
         st.error("❌ SecretsファイルからAPIキーを読み込めませんでした。`GEMINI_API_KEY`キーを確認してください。")
         st.stop()
@@ -424,7 +423,7 @@ if st.session_state["authentication_status"]:
     st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード (任意)</div>', unsafe_allow_html=True)
     
     # 1. ファイルアップロードの説明を修正
-    customer_file = st.file_uploader("Excelファイルをアップロードした場合は、Excelファイルの項目でPDFの情報を抽出します", 
+    customer_file = st.file_uploader("Excelファイルをアップロードした場合は、Excelファイルの項目でPDFの情報を抽出します",
                                      type=["xlsx"], key="customer_uploader")
     
     if customer_file:
@@ -466,7 +465,7 @@ if st.session_state["authentication_status"]:
         log_user_action(f"PDF抽出開始: {len(uploaded_pdfs)}件のファイル") # ★ ログ追加: PDF抽出開始 (GCSに転記)
         
         # 抽出ボタンが押されたら、以前の提案メッセージと抽出メッセージをクリア
-        st.session_state["proposal_message"] = "" 
+        st.session_state["proposal_message"] = ""
         st.session_state["extract_messages"] = [] # メッセージをリセット
         
         results = []
@@ -523,7 +522,7 @@ if st.session_state["authentication_status"]:
                 # 順序を設定: 抽出フィールド + ファイル名 (要件1: ファイル名がfieldsにない場合は最後に追加)
                 column_order = [f for f in fields if f in df_extracted.columns]
                 if "ファイル名" in df_extracted.columns and "ファイル名" not in column_order:
-                        column_order.append("ファイル名")
+                     column_order.append("ファイル名")
 
                 df_final = df_extracted.reindex(columns=column_order)
             
@@ -607,4 +606,4 @@ if st.session_state["authentication_status"]:
 
 
     st.markdown("---")
-    st.markdown("**保険業務自動化アシスタント** | Streamlit + Gemini 1.5 Flash")
+    st.markdown("**保険業務自動化アシスタント** | Streamlit + Gemini 2.5 Flash")
