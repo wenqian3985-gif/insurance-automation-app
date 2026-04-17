@@ -915,12 +915,20 @@ if st.session_state["authentication_status"]:
     # ※ customer_file が None の場合は session_state["fields"] を変更しない
     #   （session_state 初期化時に DEFAULT_FIELDS がセット済みのため）
 
-    if st.session_state["customer_file_name"]:
-        field_info = f"現在の抽出フィールド: {', '.join(st.session_state['fields'])}"
-    else:
-        field_info = f"現在の抽出フィールド（既定）: {', '.join(DEFAULT_FIELDS)}"
+# 現在の項目数を取得
+    field_count = len(st.session_state["fields"])
 
-    st.info(field_info)
+    if st.session_state["customer_file_name"]:
+        summary_text = f"現在の抽出フィールド: {st.session_state['customer_file_name']} から設定（計 {field_count} 項目）"
+    else:
+        summary_text = f"現在の抽出フィールド（システム既定）: 計 {field_count} 項目"
+
+    # 青い枠には件数だけをスッキリ表示
+    st.info(summary_text)
+
+    # 詳細を見たい場合だけ開ける折りたたみメニュー
+    with st.expander("🔽 抽出項目の詳細リストを確認する"):
+        st.write(", ".join(st.session_state["fields"]))
 
     st.markdown('<div class="section-header">📄 2. 見積書PDFから情報抽出</div>', unsafe_allow_html=True)
     uploaded_pdfs = st.file_uploader(
