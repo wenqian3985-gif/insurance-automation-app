@@ -20,3 +20,5 @@ google-api-core==2.19.1
 # GCSへの接続と認証に必要
 google-auth
 google-cloud-storage
+
+pymupdf4llm
