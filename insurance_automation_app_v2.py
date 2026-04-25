@@ -192,28 +192,34 @@ def load_and_map_secrets():
     try:
         auth_config = st.secrets["auth_users"]
         mapped_users = {}
-        base_users = set(
-            key.rsplit("_", 1)
+
+        base_users = {
+            key.rsplit("_", 1)[0]
             for key in auth_config.keys()
             if key.endswith(("_username", "_name", "_password"))
-        )
+        }
+
         for user_key in base_users:
             username_key = f"{user_key}_username"
             name_key = f"{user_key}_name"
             pass_key = f"{user_key}_password"
+
             if all(k in auth_config for k in [username_key, name_key, pass_key]):
                 login_username = auth_config[username_key]
                 mapped_users[login_username] = {
                     "name": auth_config[name_key],
                     "password": auth_config[pass_key],
                 }
+
         if not mapped_users:
-            st.error("❌ Secretsファイルに有効なユーザー情報が定義されていません。")
+            st.error("❌ Secretsファイルに有効なユーザー情報が定義されていません。`[auth_users]`セクションを確認してください。")
             st.session_state["authentication_status"] = False
             return {}
+
         return mapped_users
+
     except KeyError:
-        st.error("❌ Secretsファイルから認証情報を読み込めませんでした。")
+        st.error("❌ Secretsファイルから認証情報 (`auth_users`) を読み込めませんでした。`.streamlit/secrets.toml`の構造を確認してください。")
         st.session_state["authentication_status"] = False
         return {}
     except Exception as e:
@@ -599,7 +605,7 @@ if st.session_state["authentication_status"]:
         st.stop()
 
     st.markdown('<div class="section-header">📁 1. 顧客情報ファイルをアップロード (任意)</div>', unsafe_allow_html=True)
-    col1, col2 = st.columns()
+    col1, col2 = st.columns([3, 1])
 
     with col1:
         customer_file = st.file_uploader(
