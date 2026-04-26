@@ -1,6 +1,9 @@
 from typing import List
 import json
 
+def _ensure_output_keys(fields: List[str]) -> List[str]:
+    return list(dict.fromkeys(fields + ["保険会社", "プラン", "プラン識別子"]))
+
 def build_mitsui_step1_prompt() -> str:
     """ステップ1: 三井住友海上の基本情報の抽出"""
     return (
@@ -9,15 +12,19 @@ def build_mitsui_step1_prompt() -> str:
         "2. 所在地: 1枚目の所在地関連の項目\n"
         "3. 建築年月: 1枚目上部の「建築年月」の右側の値\n"
         "4. 広さ: 1枚目上部の「専有延面積」の右側の値\n"
-        "5. 建物構造: 2枚目上部の「構造級別」の右側の値\n"
-        "6. 物件種別: 2枚目上部の「建物形態」の右側の値\n\n"
+        "5. 建物構造: 1枚目上部の「構造級別」の右側の値\n"
+        "6. 物件種別: 1枚目上部の「建物形態」の右側の値\n"
+        "7. 保険会社: PDF内の「三井住友海上」または「ＧＫ すまいの保険」から「三井住友海上」を出力\n\n"
         "必ず以下のJSONのみを出力してください（マークダウン符号の使用禁止）:\n"
-        "{\"氏名\": \"\", \"所在地\": \"\", \"建築年月\": \"\", \"広さ\": \"\", \"建物構造\": \"\", \"物件種別\": \"\"}"
+        "{\"氏名\": \"\", \"所在地\": \"\", \"建築年月\": \"\", \"広さ\": \"\", \"建物構造\": \"\", \"物件種別\": \"\", \"保険会社\": \"三井住友海上\"}"
     )
 
 def build_mitsui_step2_prompt(fields: List[str], common_info: dict) -> str:
     """ステップ2: 三井住友海上のプラン比較表からの詳細抽出"""
-    template_obj = {k: "" for k in fields}
+    output_fields = _ensure_output_keys(fields)
+    template_obj = {k: "" for k in output_fields}
+    template_obj["保険会社"] = "三井住友海上"
+    template_obj["プラン"] = "Ⅰコースなど"
     template_obj["プラン識別子"] = "Ⅰコースなど"
     template_json_str = json.dumps([template_obj, template_obj, template_obj], ensure_ascii=False, indent=2)
 
@@ -25,6 +32,9 @@ def build_mitsui_step2_prompt(fields: List[str], common_info: dict) -> str:
         f"以下の【基本情報】を全プランに適用し、1枚目の比較表（Ⅰコース〜Ⅲコースなど）から詳細を抽出してください。\n\n"
         f"【基本情報】\n{json.dumps(common_info, ensure_ascii=False)}\n\n"
         "【抽出の絶対ルール】\n"
+        "0. 保険会社: 全行に必ず「三井住友海上」と出力してください。\n"
+        "0-1. プラン: PDF上の「ご契約プラン」配下の見出しをそのまま出力してください。例: 「Ⅲコース」「Ⅱコース」「Ⅰコース」。\n"
+        "0-2. プラン識別子: プランと同じ値を出力してください。\n"
         "1. 保険金額の抽出箇所:\n"
         "   - 建物_基本_保険金額: 1枚目プラン比較表の「建物」の行\n"
         "   - 建物_地震_保険金額: 1枚目プラン比較表の「建物」の下の「地震」の行\n"
