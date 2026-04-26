@@ -1,6 +1,10 @@
 from typing import List
 import json
 
+def _ensure_output_keys(fields: List[str]) -> List[str]:
+    """システム必須項目をJSON出力キーに追加する"""
+    return list(dict.fromkeys(fields + ["保険会社", "プラン", "プラン識別子"]))
+
 def build_tokio_step1_prompt() -> str:
     """ステップ1: 東京海上日動の基本情報の抽出"""
     return (
@@ -10,14 +14,18 @@ def build_tokio_step1_prompt() -> str:
         "3. 建築年月: 2枚目上部の「建築年月」の直後の値\n"
         "4. 広さ: 2枚目上部の「面積」の直後の値\n"
         "5. 建物構造: 2枚目上部の「構造」の直後の値\n"
-        "6. 物件種別: 2枚目上部の「物件種別」の直後の値\n\n"
+        "6. 物件種別: 2枚目上部の「物件種別」の直後の値\n"
+        "7. 保険会社: PDF内の「引受保険会社：東京海上日動火災保険株式会社」から「東京海上日動」を出力\n\n"
         "必ず以下のJSONのみを出力してください（マークダウン符号の使用禁止）:\n"
-        "{\"氏名\": \"\", \"所在地\": \"\", \"建築年月\": \"\", \"広さ\": \"\", \"建物構造\": \"\", \"物件種別\": \"\"}"
+        "{\"氏名\": \"\", \"所在地\": \"\", \"建築年月\": \"\", \"広さ\": \"\", \"建物構造\": \"\", \"物件種別\": \"\", \"保険会社\": \"東京海上日動\"}"
     )
 
 def build_tokio_step2_prompt(fields: List[str], common_info: dict) -> str:
     """ステップ2: 東京海上日動のプラン比較表からの詳細抽出"""
-    template_obj = {k: "" for k in fields}
+    output_fields = _ensure_output_keys(fields)
+    template_obj = {k: "" for k in output_fields}
+    template_obj["保険会社"] = "東京海上日動"
+    template_obj["プラン"] = "プラン①など"
     template_obj["プラン識別子"] = "プラン①など"
     template_json_str = json.dumps([template_obj, template_obj, template_obj], ensure_ascii=False, indent=2)
 
@@ -25,6 +33,9 @@ def build_tokio_step2_prompt(fields: List[str], common_info: dict) -> str:
         f"以下の【基本情報】を全プランに適用し、2枚目の比較表から各プランの詳細を抽出してください。\n\n"
         f"【基本情報】\n{json.dumps(common_info, ensure_ascii=False)}\n\n"
         "【抽出の絶対ルール】\n"
+        "0. 保険会社: 全行に必ず「東京海上日動」と出力してください。\n"
+        "0-1. プラン: PDF上のプラン見出しをそのまま出力してください。東京海上日動は「＜プラン①＞」「＜プラン②＞」「＜プラン③＞」があるため、出力値は「プラン①」「プラン②」「プラン③」としてください。\n"
+        "0-2. プラン識別子: プランと同じ値を出力してください。\n"
         "1. 保険金額の抽出箇所:\n"
         "   - 建物_基本_保険金額: 2枚目プラン比較表の「住まいの保険」の列、「建物」の行\n"
         "   - 建物_地震_保険金額: 2枚目プラン比較表の「地震保険」の列、「建物」の行\n"
