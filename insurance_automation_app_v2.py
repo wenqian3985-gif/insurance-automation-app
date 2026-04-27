@@ -738,8 +738,20 @@ if st.session_state["authentication_status"]:
                 else: st.info(msg)
 
     if not st.session_state["comparison_df"].empty:
-        st.dataframe(st.session_state["comparison_df"], use_container_width=True)
-
+        st.dataframe(
+            st.session_state["comparison_df"],
+            use_container_width=True,
+            column_config={
+                "保険会社": st.column_config.TextColumn(
+                    "保険会社",
+                    pinned=True,
+                ),
+                "プラン": st.column_config.TextColumn(
+                    "プラン",
+                    pinned=True,
+                ),
+            },
+        )
     if st.session_state.get("debug_raw_responses"):
         with st.expander("🔍 Gemini生レスポンス（デバッグ用）", expanded=False):
             for entry in st.session_state["debug_raw_responses"]:
