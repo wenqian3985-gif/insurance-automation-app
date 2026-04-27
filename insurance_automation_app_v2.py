@@ -33,6 +33,8 @@ JST = datetime.timezone(datetime.timedelta(hours=+9), "JST")
 # デフォルト抽出項目（ヒアリング後の24項目）
 # ======================
 DEFAULT_FIELDS = [
+    "保険会社",
+    "プラン",
     "氏名",
     "建築年月",
     "広さ",
@@ -65,7 +67,7 @@ DEFAULT_FIELDS = [
 @st.cache_resource
 def init_gcs_client():
     try:
-        gcs_credentials_info = st.secrets["gcs_service_account"]
+        gcs_credentials_info = dict(st.secrets["gcs_service_account"])
         credentials = service_account.Credentials.from_service_account_info(gcs_credentials_info)
         client = storage.Client(credentials=credentials)
         bucket_name = st.secrets["gcs_config"]["bucket_name"]
@@ -205,10 +207,10 @@ def load_and_map_secrets():
             pass_key = f"{user_key}_password"
 
             if all(k in auth_config for k in [username_key, name_key, pass_key]):
-                login_username = auth_config[username_key]
+                login_username = str(auth_config[username_key])
                 mapped_users[login_username] = {
-                    "name": auth_config[name_key],
-                    "password": auth_config[pass_key],
+                    "name": str(auth_config[name_key]),
+                    "password": str(auth_config[pass_key]),
                 }
 
         if not mapped_users:
@@ -257,6 +259,8 @@ def logout():
 # 項目名ゆれ吸収用辞書（24項目向け簡易版）
 # ======================
 FIELD_ALIASES = {
+    "保険会社": ["保険会社", "保険会社名", "引受保険会社", "会社名"],
+    "プラン": ["プラン", "ご案内プラン", "ご契約プラン", "プラン識別子", "コース"],
     "氏名": ["法人名", "氏名", "ご氏名", "契約者名", "被保険者名", "記名被保険者", "様"],
     "保険期間": ["期間", "保険期間", "始期日・保険期間", "契約期間"],
     "保険料": ["保険料", "合計保険料", "総払込保険料", "1回分保険料", "基本保険料", "年間保険料"],
@@ -308,30 +312,39 @@ def expected_plan_count(insurer: str) -> int:
     return 1
 
 def normalize_extracted_record(record: Dict[str, Any], fields: List[str], pdf_name: str, insurer: str) -> Dict[str, Any]:
-    normalized = {f: "" for f in fields}
+    output_fields = list(dict.fromkeys(["保険会社", "プラン"] + fields + ["プラン識別子"]))
+    normalized = {f: "" for f in output_fields}
+
     for k, v in record.items():
         if k in normalized:
             normalized[k] = clean_value(v)
 
-    for field in fields:
-        if normalized[field]: continue
+    for field in output_fields:
+        if normalized[field]:
+            continue
         norm_field = normalize_label(field)
         for src_key, src_val in record.items():
             if normalize_label(src_key) == norm_field:
                 normalized[field] = clean_value(src_val)
                 break
 
-    for field in fields:
-        if normalized[field]: continue
+    for field in output_fields:
+        if normalized[field]:
+            continue
         aliases = get_aliases_for_field(field)
         alias_norms = [normalize_label(a) for a in aliases]
         for src_key, src_val in record.items():
             if normalize_label(src_key) in alias_norms:
                 normalized[field] = clean_value(src_val)
                 break
-                
+
+    normalized["保険会社"] = normalized.get("保険会社") or clean_value(insurer)
+    normalized["プラン"] = normalized.get("プラン") or clean_value(record.get("プラン識別子", ""))
+    normalized["プラン識別子"] = clean_value(record.get("プラン識別子", normalized.get("プラン", "")))
+    if not normalized["プラン"] and normalized["プラン識別子"]:
+        normalized["プラン"] = normalized["プラン識別子"]
+
     normalized["ファイル名"] = pdf_name
-    normalized["プラン識別子"] = clean_value(record.get("プラン識別子", ""))
     return normalized
 
 # ======================
@@ -371,7 +384,7 @@ def pil_image_to_gemini_part(img: "Image.Image") -> Dict[str, Any]:
 
 def build_multi_plan_prompt(fields: List[str], pdf_name: str, insurer: str, retry_mode: bool = False) -> str:
     """保険会社不明の場合の汎用プロンプト"""
-    all_keys = fields + ["プラン識別子"]
+    all_keys = list(dict.fromkeys(fields + ["保険会社", "プラン", "プラン識別子"]))
     numbered_keys = "\n".join([f"{i+1}. {k}" for i, k in enumerate(all_keys)])
     retry_extra = "\n・前回プラン数不足。必ず全プランを別オブジェクトで返すこと。" if retry_mode else ""
 
@@ -381,6 +394,9 @@ def build_multi_plan_prompt(fields: List[str], pdf_name: str, insurer: str, retr
         "【絶対ルール】\n"
         "・返却形式: JSON配列のみ。マークダウン符号の使用禁止\n"
         "・1プラン = 1JSONオブジェクト\n"
+        "・保険会社はPDFファイル名またはPDF本文から判定して出力\n"
+        "・プランはPDF上の見出しをそのまま出力（例：プラン①、プラン１、Ⅲコース）\n"
+        "・プラン識別子はプランと同じ値を出力\n"
         "・共通情報（氏名・所在地・広さ等）は全プランに同じ値を複製\n"
         "・補償の有無は『〇』または『』（空欄）で出力"
         + retry_extra + "\n\n"
@@ -477,7 +493,7 @@ def extract_info_with_gemini_multi_plan(pdf_bytes: bytes, fields: List[str], pdf
                 response_step1 = model.generate_content(contents_step1)
                 common_info = extract_json_from_text(response_step1.text)
                 if isinstance(common_info, list) and len(common_info) > 0:
-                    common_info = common_info
+                    common_info = common_info[0]
                 if not isinstance(common_info, dict):
                     common_info = {}
             except Exception as e:
@@ -522,6 +538,9 @@ def extract_info_with_gemini_multi_plan(pdf_bytes: bytes, fields: List[str], pdf
         unique_rows = []
         seen = set()
         for row in rows_1:
+            row["保険会社"] = clean_value(row.get("保険会社", "")) or insurer
+            row["プラン"] = clean_value(row.get("プラン", "")) or clean_value(row.get("プラン識別子", ""))
+            row["プラン識別子"] = clean_value(row.get("プラン識別子", "")) or row["プラン"]
             row["抽出日"] = today
             row["ファイル名"] = pdf_name
             key = json.dumps(row, ensure_ascii=False, sort_keys=True)
@@ -685,7 +704,7 @@ if st.session_state["authentication_status"]:
 
         if results:
             df_extracted = pd.DataFrame(results)
-            extra_cols = ["プラン識別子", "ファイル名", "抽出日"]
+            extra_cols = ["保険会社", "プラン", "プラン識別子", "ファイル名", "抽出日"]
 
             if not st.session_state["customer_df"].empty:
                 df_customer = st.session_state["customer_df"].copy()
@@ -719,8 +738,20 @@ if st.session_state["authentication_status"]:
                 else: st.info(msg)
 
     if not st.session_state["comparison_df"].empty:
-        st.dataframe(st.session_state["comparison_df"], use_container_width=True)
-
+        st.dataframe(
+            st.session_state["comparison_df"],
+            use_container_width=True,
+            column_config={
+                "保険会社": st.column_config.TextColumn(
+                    "保険会社",
+                    pinned=True,
+                ),
+                "プラン": st.column_config.TextColumn(
+                    "プラン",
+                    pinned=True,
+                ),
+            },
+        )
     if st.session_state.get("debug_raw_responses"):
         with st.expander("🔍 Gemini生レスポンス（デバッグ用）", expanded=False):
             for entry in st.session_state["debug_raw_responses"]:
